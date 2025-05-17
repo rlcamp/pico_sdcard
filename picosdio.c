@@ -213,8 +213,6 @@ int spi_sd_init(void) {
     return -1;
 }
 
-#define IDMA_SPI_READ 1
-
 int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long block_address) {
     spi_init(spi1, 24000000);
     cs_low();
@@ -246,8 +244,7 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
 
         uint16_t * restrict const block = ((uint16_t *)buf) + 256 * iblock;
 
-        const uint dma_rx = IDMA_SPI_READ;
-        dma_channel_claim(dma_rx);
+        const uint dma_rx = dma_claim_unused_channel(true);
         const uint dma_tx = dma_claim_unused_channel(true);
 
         /* there has got to be a better way to do this than clock out bytes */
@@ -264,10 +261,10 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         channel_config_set_write_increment(&cfg, true);
         dma_channel_configure(dma_rx, &cfg, block, &spi_get_hw(spi1)->dr, 256, false);
 
-        dma_channel_acknowledge_irq1(IDMA_SPI_READ);
+        dma_channel_acknowledge_irq1(dma_rx);
 
         /* since we are using sevonpend, enable the irq source but disable in nvic */
-        dma_channel_set_irq1_enabled(IDMA_SPI_READ, true);
+        dma_channel_set_irq1_enabled(dma_rx, true);
         irq_set_enabled(DMA_IRQ_1, false);
 
         /* compute a CCITT16 CRC on the bytes flowing through the rx dma */
@@ -287,12 +284,12 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         }
 
         /* disable and clear the irq that caused wfe to return due to sevonpend */
-        dma_channel_acknowledge_irq1(IDMA_SPI_READ);
+        dma_channel_acknowledge_irq1(dma_rx);
         NVIC_ClearPendingIRQ((IRQn_Type)DMA_IRQ_1);
 
         uint16_t crc_dma = dma_sniffer_get_data_accumulator();
 
-        dma_channel_set_irq1_enabled(IDMA_SPI_READ, false);
+        dma_channel_set_irq1_enabled(dma_rx, false);
 
         dma_channel_unclaim(dma_rx);
         dma_channel_unclaim(dma_tx);
