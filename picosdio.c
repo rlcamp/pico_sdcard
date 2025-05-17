@@ -1,3 +1,6 @@
+/* this is going to start out as 1-bit spi mode, roughly following the logic in the
+ equivalent samd51 code, but will then switch to 4-bit sdio mode using pio, with a set of
+ pins chosen to allow either of those modes to work with no hardware change */
 #include "pico/stdio_uart.h"
 #include "hardware/clocks.h"
 #include "hardware/irq.h"
