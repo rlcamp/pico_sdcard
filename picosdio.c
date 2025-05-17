@@ -237,29 +237,31 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
             return -1;
         }
 
-        unsigned char * restrict const block = ((unsigned char *)buf) + 512 * iblock;
+        spi_set_format(spi1, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+
+        uint16_t * restrict const block = ((uint16_t *)buf) + 256 * iblock;
 
         const uint dma_rx = dma_claim_unused_channel(true);
         const uint dma_tx = dma_claim_unused_channel(true);
 
         /* there has got to be a better way to do this than clock out bytes */
-        /* TODO: at least change these to 16 bit transactions */
         dma_channel_config cfg = dma_channel_get_default_config(dma_tx);
-        channel_config_set_transfer_data_size(&cfg, DMA_SIZE_8);
+        channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
         channel_config_set_dreq(&cfg, spi_get_dreq(spi1, true));
         channel_config_set_read_increment(&cfg, false);
-        dma_channel_configure(dma_tx, &cfg, &spi_get_hw(spi1)->dr, &(uint8_t) { 0xFF }, 512, false);
+        dma_channel_configure(dma_tx, &cfg, &spi_get_hw(spi1)->dr, &(uint16_t) { 0xFFFF }, 256, false);
 
         cfg = dma_channel_get_default_config(dma_rx);
-        channel_config_set_transfer_data_size(&cfg, DMA_SIZE_8);
+        channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
         channel_config_set_dreq(&cfg, spi_get_dreq(spi1, false));
         channel_config_set_read_increment(&cfg, false);
         channel_config_set_write_increment(&cfg, true);
-        dma_channel_configure(dma_rx, &cfg, block, &spi_get_hw(spi1)->dr, 512, false);
+        dma_channel_configure(dma_rx, &cfg, block, &spi_get_hw(spi1)->dr, 256, false);
 
         /* compute a CCITT16 CRC on the bytes flowing through the rx dma */
         dma_sniffer_enable(dma_rx, 0x2, true);
         dma_sniffer_set_data_accumulator(0);
+        dma_sniffer_set_byte_swap_enabled(true);
 
         /* start both dma channels simulataneously */
         dma_start_channel_mask((1u << dma_tx) | (1u << dma_rx));
@@ -275,8 +277,10 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         dma_sniffer_disable();
 
         uint16_t crc_swapped;
-        spi_read_blocking(spi1, 0xFF, (void *)&crc_swapped, 2);
-        const uint16_t crc_received = __builtin_bswap16(crc_swapped);
+        spi_read16_blocking(spi1, 0xFFFF, (void *)&crc_swapped, 1);
+        const uint16_t crc_received = crc_swapped;
+
+        spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
 
         dprintf(2, "%s: received crc 0x%04X, dma 0x%04X\r\n", __func__, crc_received, crc_dma);
 
