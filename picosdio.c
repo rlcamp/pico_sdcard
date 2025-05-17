@@ -329,6 +329,14 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
     return 0;
 }
 
+static void print_block(const unsigned char buf[]) {
+    for (size_t ia = 0; ia < 32; ia++) {
+        for (size_t ib = 0; ib < 16; ib++)
+            dprintf(2, " %04X", buf[ib + 16 * ia]);
+        dprintf(2, "\r\n");
+    }
+}
+
 int main(void) {
     set_sys_clock_48mhz();
 
@@ -341,12 +349,10 @@ int main(void) {
     spi_sd_init();
     static unsigned char buf[512];
     spi_sd_read_blocks(buf, 1, 0);
+    print_block(buf);
 
-    for (size_t ia = 0; ia < 32; ia++) {
-        for (size_t ib = 0; ib < 16; ib++)
-            dprintf(2, " %04X", buf[ib + 16 * ia]);
-        dprintf(2, "\r\n");
-    }
+    spi_sd_read_blocks(buf, 1, 1);
+    print_block(buf);
 
     while (1) yield();
     NVIC_SystemReset();
