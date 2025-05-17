@@ -283,8 +283,13 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         /* start both dma channels simulataneously */
         dma_start_channel_mask((1u << dma_tx) | (1u << dma_rx));
 
+        unsigned wakes = 0;
+
         /* do other things and then sleep, while waiting for dma to finish */
-        while (dma_channel_is_busy(dma_rx)) yield();
+        while (dma_channel_is_busy(dma_rx)) {
+            yield();
+            wakes++;
+        }
 
         uint16_t crc_dma = dma_sniffer_get_data_accumulator();
 
@@ -300,7 +305,8 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
 
         spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
 
-        dprintf(2, "%s: received crc 0x%04X, dma 0x%04X\r\n", __func__, crc_received, crc_dma);
+        dprintf(2, "%s: received crc 0x%04X, dma 0x%04X, %u wakes\r\n",
+                __func__, crc_received, crc_dma, wakes);
 
         if (crc_received != crc_dma) {
             cs_high();
