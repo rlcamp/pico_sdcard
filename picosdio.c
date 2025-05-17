@@ -285,19 +285,19 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
 
         /* disable and clear the irq that caused wfe to return due to sevonpend */
         dma_channel_acknowledge_irq1(dma_rx);
+        dma_channel_set_irq1_enabled(dma_rx, false);
         NVIC_ClearPendingIRQ((IRQn_Type)DMA_IRQ_1);
 
-        uint16_t crc_dma = dma_sniffer_get_data_accumulator();
-
-        dma_channel_set_irq1_enabled(dma_rx, false);
+        /* retrieve the crc that we calculated on the bytes as they came in */
+        const uint16_t crc_dma = dma_sniffer_get_data_accumulator();
 
         dma_channel_unclaim(dma_rx);
         dma_channel_unclaim(dma_tx);
         dma_sniffer_disable();
 
-        uint16_t crc_swapped;
-        spi_read16_blocking(spi1, 0xFFFF, (void *)&crc_swapped, 1);
-        const uint16_t crc_received = crc_swapped;
+        /* read the crc reported by the sd card */
+        uint16_t crc_received;
+        spi_read16_blocking(spi1, 0xFFFF, (void *)&crc_received, 1);
 
         spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
 
