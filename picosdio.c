@@ -215,11 +215,6 @@ int spi_sd_init(void) {
 
 #define IDMA_SPI_READ 1
 
-void __scratch_y("") spi_dma_read_finish_handler(void) {
-    /* acknowledge the interrupt so that it doesn't re-fire */
-    dma_hw->ints1 = 1U << IDMA_SPI_READ;
-}
-
 int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long block_address) {
     spi_init(spi1, 24000000);
     cs_low();
@@ -270,10 +265,10 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         dma_channel_configure(dma_rx, &cfg, block, &spi_get_hw(spi1)->dr, 256, false);
 
         dma_channel_acknowledge_irq1(IDMA_SPI_READ);
-        dma_channel_set_irq1_enabled(IDMA_SPI_READ, true);
 
-        irq_set_exclusive_handler(DMA_IRQ_1, spi_dma_read_finish_handler);
-        irq_set_enabled(DMA_IRQ_1, true);
+        /* since we are using sevonpend, enable the irq source but disable in nvic */
+        dma_channel_set_irq1_enabled(IDMA_SPI_READ, true);
+        irq_set_enabled(DMA_IRQ_1, false);
 
         /* compute a CCITT16 CRC on the bytes flowing through the rx dma */
         dma_sniffer_enable(dma_rx, 0x2, true);
@@ -290,6 +285,10 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
             yield();
             wakes++;
         }
+
+        /* disable and clear the irq that caused wfe to return due to sevonpend */
+        dma_channel_acknowledge_irq1(IDMA_SPI_READ);
+        NVIC_ClearPendingIRQ((IRQn_Type)DMA_IRQ_1);
 
         uint16_t crc_dma = dma_sniffer_get_data_accumulator();
 
@@ -335,6 +334,9 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
 
 int main(void) {
     set_sys_clock_48mhz();
+
+    /* enable sevonpend so that we don't need a nearly empty isr */
+    scb_hw->scr |= M33_SCR_SEVONPEND_BITS;
 
     stdio_uart_init();
     dprintf(2, "hello world stderr\r\n");
