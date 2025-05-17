@@ -210,6 +210,13 @@ int spi_sd_init(void) {
     return -1;
 }
 
+#define IDMA_SPI_READ 1
+
+void __scratch_y("") spi_dma_read_finish_handler(void) {
+    /* acknowledge the interrupt so that it doesn't re-fire */
+    dma_hw->ints1 = 1U << IDMA_SPI_READ;
+}
+
 int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long block_address) {
     spi_init(spi1, 24000000);
     cs_low();
@@ -241,7 +248,8 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
 
         uint16_t * restrict const block = ((uint16_t *)buf) + 256 * iblock;
 
-        const uint dma_rx = dma_claim_unused_channel(true);
+        const uint dma_rx = IDMA_SPI_READ;
+        dma_channel_claim(dma_rx);
         const uint dma_tx = dma_claim_unused_channel(true);
 
         /* there has got to be a better way to do this than clock out bytes */
@@ -258,6 +266,12 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         channel_config_set_write_increment(&cfg, true);
         dma_channel_configure(dma_rx, &cfg, block, &spi_get_hw(spi1)->dr, 256, false);
 
+        dma_channel_acknowledge_irq1(IDMA_SPI_READ);
+        dma_channel_set_irq1_enabled(IDMA_SPI_READ, true);
+
+        irq_set_exclusive_handler(DMA_IRQ_1, spi_dma_read_finish_handler);
+        irq_set_enabled(DMA_IRQ_1, true);
+
         /* compute a CCITT16 CRC on the bytes flowing through the rx dma */
         dma_sniffer_enable(dma_rx, 0x2, true);
         dma_sniffer_set_data_accumulator(0);
@@ -266,11 +280,12 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         /* start both dma channels simulataneously */
         dma_start_channel_mask((1u << dma_tx) | (1u << dma_rx));
 
-        /* do other things while waiting for dma to finish */
-        /* TODO: enable interrupt and wait for it */
-        while (dma_channel_is_busy(dma_rx)) { __SEV(); yield(); }
+        /* do other things and then sleep, while waiting for dma to finish */
+        while (dma_channel_is_busy(dma_rx)) yield();
 
         uint16_t crc_dma = dma_sniffer_get_data_accumulator();
+
+        dma_channel_set_irq1_enabled(IDMA_SPI_READ, false);
 
         dma_channel_unclaim(dma_rx);
         dma_channel_unclaim(dma_tx);
