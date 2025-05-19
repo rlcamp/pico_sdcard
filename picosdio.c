@@ -10,6 +10,8 @@
 #include "hardware/gpio.h"
 #include "RP2350.h"
 
+#define BAUD_RATE_FAST 24000000
+
 #include <stdio.h>
 
 void yield(void) {
@@ -179,7 +181,7 @@ int spi_sd_init(void) {
     dprintf(2, "%s: cmd55+acmd41 success\r\n", __func__);
 
     spi_deinit(spi1);
-    const unsigned actual_baud = spi_init(spi1, 24000000);
+    const unsigned actual_baud = spi_init(spi1, BAUD_RATE_FAST);
     dprintf(2, "%s: baud rate set to %u\r\n", __func__, actual_baud);
 
     /* TODO: if any of the following fail, restart the procedure with a lower baud rate */
@@ -214,7 +216,7 @@ int spi_sd_init(void) {
 }
 
 int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long block_address) {
-    spi_init(spi1, 24000000);
+    spi_init(spi1, BAUD_RATE_FAST);
     cs_low();
     wait_for_card_ready();
 
