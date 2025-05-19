@@ -348,13 +348,15 @@ int main(void) {
     stdio_uart_init();
     dprintf(2, "hello world stderr\r\n");
 
-    spi_sd_init();
-    static unsigned char buf[512];
-    spi_sd_read_blocks(buf, 1, 0);
-    print_block(buf);
+    do {
+        if (-1 == spi_sd_init()) break;
+        static unsigned char buf[512];
+        if (-1 == spi_sd_read_blocks(buf, 1, 0)) break;
+        print_block(buf);
 
-    spi_sd_read_blocks(buf, 1, 1);
-    print_block(buf);
+        if (-1 == spi_sd_read_blocks(buf, 1, 1)) break;
+        print_block(buf);
+    } while(0);
 
     while (1) yield();
     NVIC_SystemReset();
