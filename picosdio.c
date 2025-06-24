@@ -306,19 +306,11 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         /* start the dma channel */
         dma_start_channel_mask(1u << dma_tx);
 
-        unsigned wakes = 0;
-
         /* do other things and then sleep, while waiting for dma to finish */
-        while (dma_channel_is_busy(dma_tx)) {
+        while (dma_channel_is_busy(dma_tx))
             yield();
-            wakes++;
-        }
 
-        while (spi_is_busy(spi1)) {
-            __sev();
-            yield();
-            wakes++;
-        }
+        card_overhead_numerator += 512;
 
         /* disable and clear the irq that caused wfe to return due to sevonpend */
         dma_channel_acknowledge_irq1(dma_tx);
@@ -331,14 +323,23 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         dma_channel_unclaim(dma_tx);
         dma_sniffer_disable();
 
+        /* wait for the rest of the spi tx fifo to drain, with wfe inhibited because it
+         will not be accompanied by an interrupt that would wake the processor */
+        while (spi_is_busy(spi1)) {
+            __sev();
+            yield();
+        }
+
+        /* write the calculated crc out to the card so it can validate it */
         spi_write16_blocking(spi1, &crc_dma, 1);
 
         card_overhead_numerator += 2;
 
+        /* change format back to 8 bit */
         while (spi_is_busy(spi1));
-
         spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
 
+        /* read one byte response from card to see if it validated the crc */
         uint8_t response;
         spi_read_blocking(spi1, 0xff, &response, 1);
         card_overhead_numerator++;
