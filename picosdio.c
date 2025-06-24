@@ -288,7 +288,7 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         /* disable and clear the irq that caused wfe to return due to sevonpend */
         dma_channel_acknowledge_irq1(dma_rx);
         dma_channel_set_irq1_enabled(dma_rx, false);
-        NVIC_ClearPendingIRQ((IRQn_Type)DMA_IRQ_1);
+        irq_clear(DMA_IRQ_1);
 
         /* retrieve the crc that we calculated on the bytes as they came in */
         const uint16_t crc_dma = dma_sniffer_get_data_accumulator();
