@@ -4,6 +4,7 @@
 #include "pico/stdio_uart.h"
 #include "hardware/clocks.h"
 #include "hardware/irq.h"
+#include "hardware/sync.h"
 #include "hardware/uart.h"
 #include "hardware/dma.h"
 #include "hardware/spi.h"
@@ -77,6 +78,8 @@ static uint32_t spi_receive_uint32be(void) {
     spi_read_blocking(spi1, 0xFF, (void *)&ret, 4);
     return __builtin_bswap32(ret);
 }
+
+unsigned long card_overhead_numerator = 0;
 
 int spi_sd_init(void) {
     spi_init(spi1, 400000);
@@ -156,9 +159,9 @@ int spi_sd_init(void) {
 
     /* cmd55, then acmd41, init. must loop this until the response is 0 */
     for (size_t ipass = 0;; ipass++) {
-        if (ipass > 400000 / (8 * 20)) {
-            /* each pass takes about 20 bytes minimum, give up after one second */
+        if (ipass > 2500) {
             spi_deinit(spi1);
+            dprintf(2, "%s: giving up\r\n", __func__);
             return -1;
         }
         cs_low();
@@ -213,6 +216,159 @@ int spi_sd_init(void) {
     cs_high();
     spi_deinit(spi1);
     return -1;
+}
+
+int spi_sd_write_blocks_start(unsigned long long block_address) {
+    spi_init(spi1, BAUD_RATE_FAST);
+    cs_low();
+    wait_for_card_ready();
+
+    const uint8_t response = command_and_r1_response(25, block_address);
+    if (response != 0) {
+        cs_high();
+        spi_deinit(spi1);
+        return -1;
+    }
+
+    /* extra byte prior to data packet */
+    spi_write_blocking(spi1, (unsigned char[1]) { 0xff }, 1);
+
+    return 0;
+}
+
+void spi_sd_write_blocks_end(void) {
+    /* send stop tran token */
+    spi_write_blocking(spi1, (unsigned char[2]) { 0xfd, 0xff }, 2);
+
+    wait_for_card_ready();
+
+    cs_high();
+    spi_deinit(spi1);
+}
+
+int spi_sd_write_pre_erase(unsigned long blocks) {
+    spi_init(spi1, BAUD_RATE_FAST);
+    cs_low();
+    wait_for_card_ready();
+
+    const uint8_t cmd55_r1_response = command_and_r1_response(55, 0);
+    cs_high();
+
+    if (cmd55_r1_response > 1) {
+        spi_deinit(spi1);
+        return -1;
+    }
+
+    cs_low();
+    wait_for_card_ready();
+
+    const uint8_t acmd23_r1_response = command_and_r1_response(23, blocks);
+
+    cs_high();
+    spi_deinit(spi1);
+
+    return acmd23_r1_response ? -1 : 0;
+}
+
+int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
+    for (size_t iblock = 0; iblock < blocks; iblock++) {
+        const unsigned char * block = buf ? (void *)((unsigned char *)buf + 512 * iblock) : NULL;
+
+        while (spi_is_busy(spi1));
+        spi_write_blocking(spi1, (unsigned char[1]) { 0xfc }, 1);
+        card_overhead_numerator++;
+
+        while (spi_is_busy(spi1));
+
+        spi_set_format(spi1, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+
+        const uint dma_tx = dma_claim_unused_channel(true);
+
+        /* there has got to be a better way to do this than clock out bytes */
+        dma_channel_config cfg = dma_channel_get_default_config(dma_tx);
+        channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
+        channel_config_set_dreq(&cfg, spi_get_dreq(spi1, true));
+        channel_config_set_read_increment(&cfg, true);
+        channel_config_set_write_increment(&cfg, false);
+        dma_channel_configure(dma_tx, &cfg, &spi_get_hw(spi1)->dr, block, 256, false);
+
+        dma_channel_acknowledge_irq1(dma_tx);
+
+        /* since we are using sevonpend, enable the irq source but disable in nvic */
+        dma_channel_set_irq1_enabled(dma_tx, true);
+        irq_set_enabled(DMA_IRQ_1, false);
+
+        /* compute a CCITT16 CRC on the bytes flowing through the rx dma */
+        dma_sniffer_enable(dma_tx, 0x2, true);
+        dma_sniffer_set_data_accumulator(0);
+        dma_sniffer_set_byte_swap_enabled(true);
+
+        /* start the dma channel */
+        dma_start_channel_mask(1u << dma_tx);
+
+        unsigned wakes = 0;
+
+        /* do other things and then sleep, while waiting for dma to finish */
+        while (dma_channel_is_busy(dma_tx)) {
+            yield();
+            wakes++;
+        }
+
+        while (spi_is_busy(spi1)) {
+            __sev();
+            yield();
+            wakes++;
+        }
+
+        /* disable and clear the irq that caused wfe to return due to sevonpend */
+        dma_channel_acknowledge_irq1(dma_tx);
+        dma_channel_set_irq1_enabled(dma_tx, false);
+        irq_clear(DMA_IRQ_1);
+
+        /* retrieve the crc that we calculated on the bytes as they came in */
+        const uint16_t crc_dma = dma_sniffer_get_data_accumulator();
+
+        dma_channel_unclaim(dma_tx);
+        dma_sniffer_disable();
+
+        spi_write16_blocking(spi1, &crc_dma, 1);
+
+        card_overhead_numerator += 2;
+
+        while (spi_is_busy(spi1));
+
+        spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+
+        uint8_t response;
+        spi_read_blocking(spi1, 0xff, &response, 1);
+        card_overhead_numerator++;
+        response &= 0b11111;
+
+        wait_for_card_ready();
+
+        if (0b00101 != response) {
+            if (0b01011 == response)
+                dprintf(2, "%s: bad crc\r\n", __func__);
+            else
+                dprintf(2, "%s: error 0x%x\r\n", __func__, response);
+
+            cs_high();
+            spi_deinit(spi1);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int spi_sd_write_blocks(const void * buf, const unsigned long blocks, const unsigned long long block_address) {
+    if (-1 == spi_sd_write_blocks_start(block_address) ||
+        -1 == spi_sd_write_some_blocks(buf, blocks))
+        return -1;
+
+    spi_sd_write_blocks_end();
+
+    return 0;
 }
 
 int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long block_address) {
@@ -274,7 +430,7 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         dma_sniffer_set_data_accumulator(0);
         dma_sniffer_set_byte_swap_enabled(true);
 
-        /* start both dma channels simulataneously */
+        /* start both dma channels simultaneously */
         dma_start_channel_mask((1u << dma_tx) | (1u << dma_rx));
 
         unsigned wakes = 0;
@@ -340,7 +496,8 @@ static void print_block(const unsigned char buf[]) {
 }
 
 int main(void) {
-    set_sys_clock_48mhz();
+//    set_sys_clock_48mhz();
+    set_sys_clock_hz(96000000, true);
 
     /* enable sevonpend so that we don't need a nearly empty isr */
     scb_hw->scr |= M33_SCR_SEVONPEND_BITS;
@@ -353,6 +510,11 @@ int main(void) {
         static unsigned char buf[512];
         if (-1 == spi_sd_read_blocks(buf, 1, 0)) break;
         print_block(buf);
+
+        if (-1 == spi_sd_read_blocks(buf, 1, 1)) break;
+        print_block(buf);
+
+        if (-1 == spi_sd_write_blocks(buf, 1, 1)) break;
 
         if (-1 == spi_sd_read_blocks(buf, 1, 1)) break;
         print_block(buf);
