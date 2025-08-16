@@ -14,7 +14,7 @@
 
 size_t fatfs_sectors_read = 0, fatfs_sectors_written = 0;
 
-unsigned char verbose = 2;
+unsigned char verbose = 1;
 
 unsigned char diskio_initted = 0;
 
@@ -49,6 +49,8 @@ static DRESULT flush_deferred_zeros(void) {
 
     fatfs_sectors_written += count;
 
+    if (verbose >= 1)
+        dprintf(2, "%s: writing %u blocks of deferred zeros\r\n", __func__, count);
     if (-1 == spi_sd_write_blocks(NULL, count, deferred_zeros_sector_start))
         return RES_ERROR;
     return 0;
@@ -83,7 +85,7 @@ DRESULT disk_read(BYTE pdrv, BYTE * buff, LBA_t sector, UINT count) {
             return 0;
         }
 
-    if (verbose >= 2)
+    if (verbose >= 1)
         dprintf(2, "%s(%d): reading %u blocks starting at %u\r\n", __func__, __LINE__, count, (unsigned)sector);
 
     fatfs_sectors_read += count;
@@ -117,7 +119,7 @@ DRESULT disk_write(BYTE pdrv, const BYTE * buff, LBA_t sector, UINT count) {
         if (res) return res;
     }
 
-    if (verbose >= 2)
+    if (verbose >= 1)
         dprintf(2, "%s(%d): writing block(s) starting at %u\r\n", __func__, __LINE__, (unsigned)sector);
 
     fatfs_sectors_written += count;
