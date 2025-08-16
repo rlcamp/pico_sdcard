@@ -26,14 +26,14 @@ pico_sdk_init()
 set("CMAKE_C_FLAGS" "${CMAKE_C_FLAGS}  -Wall -Wextra -Wshadow")
 
 # rest of your project
-add_executable(picosdio
-    picosdio.c
+add_executable(pico_sdcard
+    pico_sdcard.c
 )
 
 # pull in common dependencies
-target_link_libraries(picosdio pico_stdlib cmsis_core hardware_dma hardware_pio hardware_spi)
+target_link_libraries(pico_sdcard pico_stdlib cmsis_core hardware_dma hardware_pio hardware_spi)
 
-pico_enable_stdio_uart(picosdio 1)
+pico_enable_stdio_uart(pico_sdcard 1)
 
 # create map/bin/hex/uf2 file in addition to ELF.
-pico_add_extra_outputs(picosdio)
+pico_add_extra_outputs(pico_sdcard)
