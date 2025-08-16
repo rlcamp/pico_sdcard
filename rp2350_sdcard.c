@@ -288,6 +288,7 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         channel_config_set_dreq(&cfg, spi_get_dreq(spi1, true));
         channel_config_set_read_increment(&cfg, true);
         channel_config_set_write_increment(&cfg, false);
+        channel_config_set_bswap(&cfg, true);
         dma_channel_configure(dma_tx, &cfg, &spi_get_hw(spi1)->dr, block, 256, false);
 
         dma_channel_acknowledge_irq1(dma_tx);
@@ -299,7 +300,6 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         /* compute a CCITT16 CRC on the bytes flowing through the rx dma */
         dma_sniffer_enable(dma_tx, 0x2, true);
         dma_sniffer_set_data_accumulator(0);
-        dma_sniffer_set_byte_swap_enabled(true);
 
         /* start the dma channel */
         dma_start_channel_mask(1u << dma_tx);
@@ -416,6 +416,7 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         channel_config_set_dreq(&cfg, spi_get_dreq(spi1, false));
         channel_config_set_read_increment(&cfg, false);
         channel_config_set_write_increment(&cfg, true);
+        channel_config_set_bswap(&cfg, true);
         dma_channel_configure(dma_rx, &cfg, block, &spi_get_hw(spi1)->dr, 256, false);
 
         dma_channel_acknowledge_irq1(dma_rx);
@@ -427,7 +428,6 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         /* compute a CCITT16 CRC on the bytes flowing through the rx dma */
         dma_sniffer_enable(dma_rx, 0x2, true);
         dma_sniffer_set_data_accumulator(0);
-        dma_sniffer_set_byte_swap_enabled(true);
 
         /* start both dma channels simultaneously */
         dma_start_channel_mask((1u << dma_tx) | (1u << dma_rx));

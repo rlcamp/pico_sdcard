@@ -16,7 +16,7 @@ void yield(void) {
 static void print_block(const unsigned char buf[]) {
     for (size_t ia = 0; ia < 32; ia++) {
         for (size_t ib = 0; ib < 16; ib++)
-            dprintf(2, " %04X", buf[ib + 16 * ia]);
+            dprintf(2, " %02X", buf[ib + 16 * ia]);
         dprintf(2, "\r\n");
     }
 }
