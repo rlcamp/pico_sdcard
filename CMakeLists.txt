@@ -29,6 +29,9 @@ set("CMAKE_C_FLAGS" "${CMAKE_C_FLAGS}  -Wall -Wextra -Wshadow")
 add_executable(pico_sdcard
     pico_sdcard.c
     rp2350_sdcard.c
+    diskio.c
+    ff.c
+    ffunicode.c
 )
 
 # pull in common dependencies
