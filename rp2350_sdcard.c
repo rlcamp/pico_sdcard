@@ -282,7 +282,6 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
 
         const uint dma_tx = dma_claim_unused_channel(true);
 
-        /* there has got to be a better way to do this than clock out bytes */
         dma_channel_config cfg = dma_channel_get_default_config(dma_tx);
         channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
         channel_config_set_dreq(&cfg, spi_get_dreq(spi1, true));
@@ -299,6 +298,7 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
 
         /* compute a CCITT16 CRC on the bytes flowing through the rx dma */
         dma_sniffer_enable(dma_tx, 0x2, true);
+        dma_sniffer_set_byte_swap_enabled(true);
         dma_sniffer_set_data_accumulator(0);
 
         /* start the dma channel */
@@ -347,7 +347,7 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
 
         if (0b00101 != response) {
             if (0b01011 == response)
-                dprintf(2, "%s: bad crc\r\n", __func__);
+                dprintf(2, "%s: bad crc (sent 0x%04X)\r\n", __func__, crc_dma);
             else
                 dprintf(2, "%s: error 0x%x\r\n", __func__, response);
 
@@ -427,6 +427,7 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
 
         /* compute a CCITT16 CRC on the bytes flowing through the rx dma */
         dma_sniffer_enable(dma_rx, 0x2, true);
+        dma_sniffer_set_byte_swap_enabled(false);
         dma_sniffer_set_data_accumulator(0);
 
         /* start both dma channels simultaneously */
