@@ -500,6 +500,10 @@ int main(void) {
 //    set_sys_clock_48mhz();
     set_sys_clock_hz(96000000, true);
 
+    gpio_init(22);
+    gpio_set_dir(22, GPIO_OUT);
+    gpio_put(22, 1);
+
     /* enable sevonpend so that we don't need a nearly empty isr */
     scb_hw->scr |= M33_SCR_SEVONPEND_BITS;
 
@@ -520,6 +524,8 @@ int main(void) {
         if (-1 == spi_sd_read_blocks(buf, 1, 1)) break;
         print_block(buf);
     } while(0);
+
+    gpio_put(22, 0);
 
     while (1) yield();
     NVIC_SystemReset();
