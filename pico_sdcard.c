@@ -272,7 +272,7 @@ int main(void) {
     stdio_uart_init();
     dprintf(2, "hello world\r\n");
 
-    i2c_init(i2c0, 100000);
+    i2c_init(i2c0, 400000);
     gpio_set_function(16, GPIO_FUNC_I2C);
     gpio_set_function(17, GPIO_FUNC_I2C);
     gpio_pull_up(16);
