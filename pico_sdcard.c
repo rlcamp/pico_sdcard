@@ -7,12 +7,17 @@
 #include "hardware/uart.h"
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
+#include "hardware/i2c.h"
+
 #include "RP2350.h"
 #include "ff.h"
 #include "rp2350_sdcard.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
+#include <float.h>
+#include <stdlib.h>
 
 unsigned char verbose = 1;
 
@@ -65,6 +70,54 @@ void run_from_xosc(void) {
     while (rosc_hw->status & ROSC_STATUS_STABLE_BITS);
 }
 
+static uint16_t coefficients[5] = { };
+
+static int tsys01_init(void) {
+    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x1E }, 1, false)) return -1;
+
+    /* TODO: make this use yield() */
+    sleep_ms(10);
+
+    for (size_t iprom = 0; iprom < 5; iprom++) {
+        if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0xA2 + 2 * iprom }, 1, false)) return -1;
+
+        uint16_t tmp;
+        if (-1 == i2c_read_blocking(i2c0, 0x77, (void *)&tmp, 2, false)) return -1;
+        coefficients[4 - iprom] = __builtin_bswap16(tmp);
+        dprintf(2, "%s: k%u = %u\r\n", __func__, 4 - iprom, coefficients[4 - iprom]);
+    }
+
+    return 0;
+}
+
+static float tsys01_read(void) {
+    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x48 }, 1, false)) return FLT_MAX;
+
+    /* TODO: make this use yield() */
+    sleep_ms(10);
+
+    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x00 }, 1, false)) return FLT_MAX;
+
+    unsigned char bytes[3];
+    if (-1 == i2c_read_blocking(i2c0, 0x77, bytes, 3, false)) return FLT_MAX;
+
+    const uint32_t adc24 = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
+
+    /* TODO: this is literal from the datasheet, rework all this sketchy math to return
+     temperature in hundredths of a degree without doing any floating point */
+    const float adc16 = adc24 / 256.0f;
+    const float adc16_2 = adc16 * adc16;
+    const float adc16_3 = adc16_2 * adc16;
+    const float adc16_4 = adc16_2 * adc16_2;
+
+    const float temp = (-2.0f * coefficients[4] * 1e-21f * adc16_4 +
+                        +4.0f * coefficients[3] * 1e-16f * adc16_3 +
+                        -2.0f * coefficients[2] * 1e-11f * adc16_2 +
+                        +1.0f * coefficients[1] *  1e-6f * adc16 +
+                        -1.5f * coefficients[0] *  1e-2f);
+    return temp;
+}
+
 __attribute((aligned(4))) static FATFS * fs = &(static FATFS) { };
 __attribute((aligned(4))) static FIL * fp = &(static FIL) { };
 
@@ -110,7 +163,7 @@ int record(void) {
     /* first tick will be one interval from now */
     timer_hw->alarm[alarm_num] = timer_hw->timerawl + period_microseconds;
 
-    char line[] = "4294967295,a,b,c,d,e\n"; /* string big enough for maximum 32 bit value */
+    char line[] = "4294967295,+000.00,b,c,d,e\n"; /* string big enough for maximum 32 bit value */
 
     for (size_t iline = 0; iline < 30; iline++) {
         /* run other tasks or low power sleep until next alarm interrupt */
@@ -129,9 +182,21 @@ int record(void) {
         /* change the text */
         set_first_value_in_string(line, now);
 
+        /* TODO: redo this and the called function to not use floating point */
+        const float temp = tsys01_read();
+        const long hundredths = lrintf(temp * 100.0f);
+        const unsigned long abs_hundredths = labs(hundredths);
+        const unsigned long a = abs_hundredths / 100;
+        const unsigned long b = abs_hundredths % 100;
+
+        set_first_value_in_string(line + 12, a);
+        set_first_value_in_string(line + 16, b);
+        line[11] = hundredths < 0 ? '-' : '+';
+
         /* this will usually return immediately, occasionally it will internally yield() */
         if (-1 == fputs_to_open_file(fp, line)) return -1;
-        dprintf(2, ".");
+
+        dprintf(2, "%s", line);
     }
     dprintf(2, "\r\n");
 
@@ -169,7 +234,6 @@ int main(void) {
                              CLOCKS_WAKE_EN0_CLK_SYS_PIO0_BITS |
                              CLOCKS_WAKE_EN0_CLK_SYS_JTAG_BITS |
                              CLOCKS_WAKE_EN0_CLK_SYS_I2C1_BITS |
-                             CLOCKS_WAKE_EN0_CLK_SYS_I2C0_BITS |
                              CLOCKS_WAKE_EN0_CLK_SYS_HSTX_BITS |
                              CLOCKS_WAKE_EN0_CLK_HSTX_BITS |
                              CLOCKS_WAKE_EN0_CLK_SYS_ADC_BITS |
@@ -188,6 +252,14 @@ int main(void) {
 
     stdio_uart_init();
     dprintf(2, "hello world\r\n");
+
+    i2c_init(i2c0, 100000);
+    gpio_set_function(16, GPIO_FUNC_I2C);
+    gpio_set_function(17, GPIO_FUNC_I2C);
+    gpio_pull_up(16);
+    gpio_pull_up(17);
+
+    tsys01_init();
 
     record();
 

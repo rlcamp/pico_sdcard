@@ -35,7 +35,7 @@ add_executable(pico_sdcard
 )
 
 # pull in common dependencies
-target_link_libraries(pico_sdcard pico_stdlib cmsis_core hardware_dma hardware_pio hardware_spi)
+target_link_libraries(pico_sdcard pico_stdlib cmsis_core hardware_dma hardware_pio hardware_spi hardware_i2c)
 
 pico_enable_stdio_uart(pico_sdcard 1)
 
