@@ -68,25 +68,6 @@ void run_from_xosc(void) {
 __attribute((aligned(4))) static FATFS * fs = &(static FATFS) { };
 __attribute((aligned(4))) static FIL * fp = &(static FIL) { };
 
-int ls(void) {
-    FRESULT fres;
-    DIR dir;
-
-    if ((fres = f_opendir(&dir, "")) != FR_OK) {
-        dprintf(2, "error: %s: f_opendir(): %d\r\n", __func__, fres);
-        return -1;
-    }
-
-    FILINFO info;
-    while (FR_OK == f_readdir(&dir, &info) && info.fname[0] != '\0') {
-        if ('.' == info.fname[0]) continue;
-        dprintf(2, "%s\r\n", info.fname);
-    }
-
-    f_closedir(&dir);
-    return 0;
-}
-
 int record(void) {
     FRESULT fres;
     if ((fres = f_mount(fs, "", 1))) {
@@ -98,8 +79,6 @@ int record(void) {
     }
 
     dprintf(2, "%s: mounted\r\n", __func__);
-
-    if (-1 == ls()) return -1;
 
     /* loop until we get to the first available filename */
     unsigned file_id = 0;
