@@ -72,11 +72,31 @@ void run_from_xosc(void) {
 
 static uint16_t coefficients[5] = { };
 
+static void lower_power_sleep_ms(const unsigned delay_ms) {
+    /* get a timer, enable interrupt for alarm, but leave it disabled in nvic */
+    const unsigned alarm_num = timer_hardware_alarm_claim_unused(timer_hw, true);
+    hw_set_bits(&timer_hw->inte, 1U << alarm_num);
+    irq_set_enabled(hardware_alarm_get_irq_num(alarm_num), false);
+
+    /* arm timer */
+    timer_hw->alarm[alarm_num] = timer_hw->timerawl + delay_ms * 1000;
+
+    /* run other tasks or low power sleep until alarm interrupt */
+    while (!(timer_hw->intr & (1U << alarm_num)))
+        yield();
+
+    /* acknowledge and clear the interrupt in both timer and nvic */
+    hw_clear_bits(&timer_hw->intr, 1U << alarm_num);
+    irq_clear(hardware_alarm_get_irq_num(alarm_num));
+
+    /* cleanup */
+    timer_hardware_alarm_unclaim(timer_hw, alarm_num);
+}
+
 static int tsys01_init(void) {
     if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x1E }, 1, false)) return -1;
 
-    /* TODO: make this use yield() */
-    sleep_ms(10);
+    lower_power_sleep_ms(10);
 
     for (size_t iprom = 0; iprom < 5; iprom++) {
         if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0xA2 + 2 * iprom }, 1, false)) return -1;
@@ -93,8 +113,7 @@ static int tsys01_init(void) {
 static float tsys01_read(void) {
     if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x48 }, 1, false)) return FLT_MAX;
 
-    /* TODO: make this use yield() */
-    sleep_ms(10);
+    lower_power_sleep_ms(10);
 
     if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x00 }, 1, false)) return FLT_MAX;
 
