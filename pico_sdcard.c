@@ -182,14 +182,15 @@ int record(void) {
     /* first tick will be one interval from now */
     timer_hw->alarm[alarm_num] = timer_hw->timerawl + period_microseconds;
 
-    char line[] = "4294967295,+000.000,b,c,d,e\n"; /* string big enough for maximum 32 bit value */
+    /* wild guess of line format: time, temperature, ... */
+    char line[] = "0123456789.000,+000.000,+000.000,+000.000\n";
 
     for (size_t iline = 0; iline < 30; iline++) {
         /* run other tasks or low power sleep until next alarm interrupt */
         while (!(timer_hw->intr & (1U << alarm_num)))
             yield();
 
-        const unsigned now = timer_hw->timerawl;
+        const unsigned long long now = timer_time_us_64(timer_hw);
 
         /* acknowledge and clear the interrupt in both timer and nvic */
         hw_clear_bits(&timer_hw->intr, 1U << alarm_num);
@@ -198,18 +199,25 @@ int record(void) {
         /* increment and rearm the alarm */
         timer_hw->alarm[alarm_num] += period_microseconds;
 
-        /* change the text */
-        set_first_value_in_string(line, now);
+        /* set timestamp within output line */
+        /* TODO: add actual time offset via ds3231 */
+        const unsigned long long now_ms = (now + 500ULL) / 1000ULL;
+        const unsigned long long now_seconds_portion = now_ms / 1000ULL;
+        const unsigned long long now_milliseconds_portion = now_ms % 1000ULL;
 
-        /* TODO: redo this and the called function to not use floating point */
+        set_first_value_in_string(line + 0, now_seconds_portion);
+        set_first_value_in_string(line + 11, now_milliseconds_portion);
+
         const int temp_thousandths = tsys01_read_thousandths();
         const unsigned long abs_thousandths = labs(temp_thousandths);
         const unsigned long a = abs_thousandths / 1000;
         const unsigned long b = abs_thousandths % 1000;
 
-        set_first_value_in_string(line + 12, a);
-        set_first_value_in_string(line + 16, b);
-        line[11] = temp_thousandths < 0 ? '-' : '+';
+        set_first_value_in_string(line + 16, a);
+        set_first_value_in_string(line + 20, b);
+        line[15] = temp_thousandths < 0 ? '-' : '+';
+
+        /* TODO: populate remaining fields */
 
         /* this will usually return immediately, occasionally it will internally yield() */
         if (-1 == fputs_to_open_file(fp, line)) return -1;
