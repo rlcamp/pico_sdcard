@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <string.h>
 
+unsigned char verbose = 0;
+
 static void set_first_value_in_string(char buf[], unsigned value) {
     char * cursor = buf;
     while (cursor[1] >= '0' && cursor[1] <= '9') cursor++;
