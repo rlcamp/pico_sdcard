@@ -6,6 +6,7 @@
 #include "hardware/sync.h"
 #include "hardware/uart.h"
 #include "hardware/gpio.h"
+#include "hardware/timer.h"
 #include "RP2350.h"
 #include "ff.h"
 #include "rp2350_sdcard.h"
@@ -13,7 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
-unsigned char verbose = 0;
+unsigned char verbose = 1;
 
 static void set_first_value_in_string(char buf[], unsigned value) {
     char * cursor = buf;
@@ -121,7 +122,39 @@ int record(void) {
 
     dprintf(2, "%s: opened \"%s\"\r\n", __func__, path);
 
-    if (-1 == fputs_to_open_file(fp, "hello\n")) return -1;
+    /* get a timer, enable interrupt for alarm, but leave it disabled in nvic */
+    const unsigned alarm_num = timer_hardware_alarm_claim_unused(timer_hw, true);
+    hw_set_bits(&timer_hw->inte, 1U << alarm_num);
+    irq_set_enabled(hardware_alarm_get_irq_num(alarm_num), false);
+
+    const unsigned period_microseconds = 1000000;
+
+    /* first tick will be one interval from now */
+    timer_hw->alarm[alarm_num] = timer_hw->timerawl + period_microseconds;
+
+    char line[] = "4294967295,a,b,c,d,e\n"; /* string big enough for maximum 32 bit value */
+
+    for (size_t iline = 0; iline < 10; iline++) {
+        /* run other tasks or low power sleep until next alarm interrupt */
+        while (!(timer_hw->intr & (1U << alarm_num)))
+            yield();
+
+        const unsigned now = timer_hw->timerawl;
+
+        /* acknowledge and clear the interrupt in both timer and nvic */
+        hw_clear_bits(&timer_hw->intr, 1U << alarm_num);
+        irq_clear(hardware_alarm_get_irq_num(alarm_num));
+
+        /* increment and rearm the alarm */
+        timer_hw->alarm[alarm_num] += period_microseconds;
+
+        /* change the text */
+        set_first_value_in_string(line, now);
+
+        if (-1 == fputs_to_open_file(fp, line)) return -1;
+        dprintf(2, ".");
+    }
+    dprintf(2, "\r\n");
 
     if ((fres = f_close(fp))) {
         dprintf(2, "%s: f_close(\"%s\"): %d\r\n", __func__, path, fres);
