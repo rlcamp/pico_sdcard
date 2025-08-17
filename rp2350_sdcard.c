@@ -13,7 +13,7 @@
 
 #include <stdio.h>
 
-__attribute((weak)) unsigned char verbose = 1;
+__attribute((weak)) unsigned char verbose = 0;
 
 __attribute((weak)) void yield(void) {
     __DSB(); __WFE();
@@ -118,7 +118,8 @@ int spi_sd_init(void) {
         __SEV(); yield();
     }
 
-    dprintf(2, "%s: cmd0 success\r\n", __func__);
+    if (verbose >= 2)
+        dprintf(2, "%s: cmd0 success\r\n", __func__);
 
     /* cmd8, check voltage range and test pattern */
     for (size_t ipass = 0;; ipass++) {
@@ -143,7 +144,8 @@ int spi_sd_init(void) {
         if (0x1AA == response) break;
     }
 
-    dprintf(2, "%s: cmd8 success\r\n", __func__);
+    if (verbose >= 2)
+        dprintf(2, "%s: cmd8 success\r\n", __func__);
 
     /* cmd59, re-enable crc feature, which is disabled by cmd0 */
     cs_low();
@@ -155,7 +157,8 @@ int spi_sd_init(void) {
     }
     cs_high();
 
-    dprintf(2, "%s: cmd59 success\r\n", __func__);
+    if (verbose >= 2)
+        dprintf(2, "%s: cmd59 success\r\n", __func__);
 
     /* cmd55, then acmd41, init. must loop this until the response is 0 */
     for (size_t ipass = 0;; ipass++) {
@@ -181,11 +184,13 @@ int spi_sd_init(void) {
         if (!acmd41_r1_response) break;
     }
 
-    dprintf(2, "%s: cmd55+acmd41 success\r\n", __func__);
+    if (verbose >= 2)
+        dprintf(2, "%s: cmd55+acmd41 success\r\n", __func__);
 
     spi_deinit(spi1);
     const unsigned actual_baud = spi_init(spi1, BAUD_RATE_FAST);
-    dprintf(2, "%s: baud rate set to %u\r\n", __func__, actual_baud);
+    if (verbose >= 1)
+        dprintf(2, "%s: baud rate set to %u\r\n", __func__, actual_baud);
 
     /* TODO: if any of the following fail, restart the procedure with a lower baud rate */
     do {
@@ -208,7 +213,8 @@ int spi_sd_init(void) {
         cs_high();
         spi_deinit(spi1);
 
-        dprintf(2, "%s: success\r\n", __func__);
+        if (verbose >= 1)
+            dprintf(2, "%s: success\r\n", __func__);
         return 0;
     } while(0);
 
@@ -469,8 +475,9 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
 
         spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
 
-        dprintf(2, "%s: received crc 0x%04X, dma 0x%04X, %u wakes\r\n",
-                __func__, crc_received, crc_dma, wakes);
+        if (verbose >= 2)
+            dprintf(2, "%s: received crc 0x%04X, dma 0x%04X, %u wakes\r\n",
+                    __func__, crc_received, crc_dma, wakes);
 
         if (crc_received != crc_dma) {
             cs_high();

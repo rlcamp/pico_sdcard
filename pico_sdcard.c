@@ -75,7 +75,7 @@ int main(void) {
     scb_hw->scr |= M33_SCR_SEVONPEND_BITS;
 
     stdio_uart_init();
-    dprintf(2, "hello world stderr\r\n");
+    dprintf(2, "hello world\r\n");
 
     do {
         FRESULT fres;
