@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
-#include <float.h>
+#include <limits.h>
 #include <stdlib.h>
 
 unsigned char verbose = 1;
@@ -110,20 +110,20 @@ static int tsys01_init(void) {
     return 0;
 }
 
-static float tsys01_read(void) {
-    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x48 }, 1, false)) return FLT_MAX;
+static int tsys01_read_thousandths(void) {
+    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x48 }, 1, false)) return INT_MIN;
 
     lower_power_sleep_ms(10);
 
-    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x00 }, 1, false)) return FLT_MAX;
+    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x00 }, 1, false)) return INT_MIN;
 
     unsigned char bytes[3];
-    if (-1 == i2c_read_blocking(i2c0, 0x77, bytes, 3, false)) return FLT_MAX;
+    if (-1 == i2c_read_blocking(i2c0, 0x77, bytes, 3, false)) return INT_MIN;
 
     const uint32_t adc24 = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
 
-    /* TODO: this is literal from the datasheet, rework all this sketchy math to return
-     temperature in hundredths of a degree without doing any floating point */
+    /* TODO: this is literal from the datasheet, if possible rework all this sketchy math
+     to return temperature in thousandths of a degree without doing any floating point */
     const float adc16 = adc24 / 256.0f;
     const float adc16_2 = adc16 * adc16;
     const float adc16_3 = adc16_2 * adc16;
@@ -134,7 +134,7 @@ static float tsys01_read(void) {
                         -2.0f * coefficients[2] * 1e-11f * adc16_2 +
                         +1.0f * coefficients[1] *  1e-6f * adc16 +
                         -1.5f * coefficients[0] *  1e-2f);
-    return temp;
+    return lrintf(temp * 1e3f);
 }
 
 __attribute((aligned(4))) static FATFS * fs = &(static FATFS) { };
@@ -182,7 +182,7 @@ int record(void) {
     /* first tick will be one interval from now */
     timer_hw->alarm[alarm_num] = timer_hw->timerawl + period_microseconds;
 
-    char line[] = "4294967295,+000.00,b,c,d,e\n"; /* string big enough for maximum 32 bit value */
+    char line[] = "4294967295,+000.000,b,c,d,e\n"; /* string big enough for maximum 32 bit value */
 
     for (size_t iline = 0; iline < 30; iline++) {
         /* run other tasks or low power sleep until next alarm interrupt */
@@ -202,15 +202,14 @@ int record(void) {
         set_first_value_in_string(line, now);
 
         /* TODO: redo this and the called function to not use floating point */
-        const float temp = tsys01_read();
-        const long hundredths = lrintf(temp * 100.0f);
-        const unsigned long abs_hundredths = labs(hundredths);
-        const unsigned long a = abs_hundredths / 100;
-        const unsigned long b = abs_hundredths % 100;
+        const int temp_thousandths = tsys01_read_thousandths();
+        const unsigned long abs_thousandths = labs(temp_thousandths);
+        const unsigned long a = abs_thousandths / 1000;
+        const unsigned long b = abs_thousandths % 1000;
 
         set_first_value_in_string(line + 12, a);
         set_first_value_in_string(line + 16, b);
-        line[11] = hundredths < 0 ? '-' : '+';
+        line[11] = temp_thousandths < 0 ? '-' : '+';
 
         /* this will usually return immediately, occasionally it will internally yield() */
         if (-1 == fputs_to_open_file(fp, line)) return -1;
