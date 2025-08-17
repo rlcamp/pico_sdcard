@@ -68,10 +68,14 @@ static uint8_t command_and_r1_response(const uint8_t cmd, const uint32_t arg) {
     return r1_response();
 }
 
+unsigned long card_overhead_numerator = 0;
+
 static void wait_for_card_ready(void) {
     uint8_t ret;
-    do spi_read_blocking(spi1, 0xFF, &ret, 1);
-    while (ret != 0xFF);
+    do {
+        spi_read_blocking(spi1, 0xFF, &ret, 1);
+        card_overhead_numerator++;
+    } while (ret != 0xFF);
 }
 
 static uint32_t spi_receive_uint32be(void) {
@@ -79,8 +83,6 @@ static uint32_t spi_receive_uint32be(void) {
     spi_read_blocking(spi1, 0xFF, (void *)&ret, 4);
     return __builtin_bswap32(ret);
 }
-
-unsigned long card_overhead_numerator = 0;
 
 int spi_sd_init(void) {
     spi_init(spi1, 400000);
