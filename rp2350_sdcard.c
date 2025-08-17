@@ -13,6 +13,8 @@
 
 #include <stdio.h>
 
+__attribute((weak)) unsigned char verbose = 1;
+
 __attribute((weak)) void yield(void) {
     __DSB(); __WFE();
 }
@@ -343,7 +345,15 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         card_overhead_numerator++;
         response &= 0b11111;
 
-        wait_for_card_ready();
+        unsigned wait_bytes = 0;
+        uint8_t ret;
+        do {
+            spi_read_blocking(spi1, 0xFF, &ret, 1);
+            wait_bytes++;
+        } while (ret != 0xFF);
+
+        if (verbose >= 1)
+            dprintf(2, "%s: wrote block, finishing took %u bytes, crc 0x%04X\r\n", __func__, wait_bytes, crc_dma);
 
         if (0b00101 != response) {
             if (0b01011 == response)

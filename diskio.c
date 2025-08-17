@@ -1,4 +1,4 @@
-/* minimum viable glue code between fatfs and samd51 sercom spi sd code */
+/* minimum viable glue code between fatfs and spi sd code */
 
 /* definitions of datatypes and of functions expected by ff.c */
 #include "ff.h"
