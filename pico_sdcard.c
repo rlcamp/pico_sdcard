@@ -1,4 +1,7 @@
 #include "pico/stdio_uart.h"
+#include "hardware/xosc.h"
+#include "hardware/structs/rosc.h"
+#include "hardware/pll.h"
 #include "hardware/clocks.h"
 #include "hardware/sync.h"
 #include "hardware/uart.h"
@@ -42,6 +45,25 @@ void yield(void) {
     __DSB(); __WFE();
 }
 
+void run_from_xosc(void) {
+    clock_configure_undivided(clk_ref, CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC, 0, XOSC_MHZ * MHZ);
+    clock_configure_undivided(clk_sys, CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLK_REF, 0, XOSC_MHZ * MHZ);
+
+    clock_stop(clk_usb);
+    clock_stop(clk_adc);
+    clock_stop(clk_hstx);
+
+    clock_configure_undivided(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS, XOSC_MHZ * MHZ);
+
+    /* disable PLLs */
+    pll_deinit(pll_sys);
+    pll_deinit(pll_usb);
+
+    /* disable rosc and wait for it to be stopped */
+    rosc_hw->ctrl = (rosc_hw->ctrl & ~ROSC_CTRL_ENABLE_BITS) | (ROSC_CTRL_ENABLE_VALUE_DISABLE << ROSC_CTRL_ENABLE_LSB);
+    while (rosc_hw->status & ROSC_STATUS_STABLE_BITS);
+}
+
 __attribute((aligned(4))) static FATFS * fs = &(static FATFS) { };
 __attribute((aligned(4))) static FIL * fp = &(static FIL) { };
 
@@ -67,7 +89,8 @@ int ls(void) {
 
 int main(void) {
 //    set_sys_clock_48mhz();
-    set_sys_clock_hz(96000000, true);
+//    set_sys_clock_hz(96000000, true);
+    run_from_xosc();
 
     gpio_init(22);
     gpio_set_dir(22, GPIO_OUT);
