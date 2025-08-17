@@ -71,17 +71,16 @@ __attribute((aligned(4))) static FIL * fp = &(static FIL) { };
 int ls(void) {
     FRESULT fres;
     DIR dir;
-    FILINFO info;
 
     if ((fres = f_opendir(&dir, "")) != FR_OK) {
         dprintf(2, "error: %s: f_opendir(): %d\r\n", __func__, fres);
         return -1;
     }
 
+    FILINFO info;
     while (FR_OK == f_readdir(&dir, &info) && info.fname[0] != '\0') {
+        if ('.' == info.fname[0]) continue;
         dprintf(2, "%s\r\n", info.fname);
-        __SEV();
-        yield();
     }
 
     f_closedir(&dir);
@@ -134,7 +133,7 @@ int record(void) {
 
     char line[] = "4294967295,a,b,c,d,e\n"; /* string big enough for maximum 32 bit value */
 
-    for (size_t iline = 0; iline < 10; iline++) {
+    for (size_t iline = 0; iline < 30; iline++) {
         /* run other tasks or low power sleep until next alarm interrupt */
         while (!(timer_hw->intr & (1U << alarm_num)))
             yield();
@@ -151,6 +150,7 @@ int record(void) {
         /* change the text */
         set_first_value_in_string(line, now);
 
+        /* this will usually return immediately, occasionally it will internally yield() */
         if (-1 == fputs_to_open_file(fp, line)) return -1;
         dprintf(2, ".");
     }
@@ -166,8 +166,6 @@ int record(void) {
 }
 
 int main(void) {
-//    set_sys_clock_48mhz();
-//    set_sys_clock_hz(96000000, true);
     run_from_xosc();
 
     scb_hw->scr |= M33_SCR_SLEEPDEEP_BITS;
@@ -201,7 +199,6 @@ int main(void) {
     /* make sure we don't clock anything in sleep that wasn't clocked in wake */
     clocks_hw->sleep_en1 = clocks_hw->wake_en1;
     clocks_hw->sleep_en0 = clocks_hw->wake_en0;
-
 
     gpio_init(22);
     gpio_set_dir(22, GPIO_OUT);
