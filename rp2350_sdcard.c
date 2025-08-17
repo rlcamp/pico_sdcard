@@ -5,6 +5,7 @@
 #include "hardware/dma.h"
 #include "hardware/spi.h"
 #include "hardware/gpio.h"
+#include "hardware/timer.h"
 #include "RP2350.h"
 
 #include "rp2350_sdcard.h"
@@ -351,15 +352,12 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         card_overhead_numerator++;
         response &= 0b11111;
 
-        unsigned wait_bytes = 0;
-        uint8_t ret;
-        do {
-            spi_read_blocking(spi1, 0xFF, &ret, 1);
-            wait_bytes++;
-        } while (ret != 0xFF);
+        const unsigned timerawl_prior = timer_hw->timerawl;
+        wait_for_card_ready();
+        const unsigned timerawl_elapsed = timer_hw->timerawl - timerawl_prior;
 
         if (verbose >= 1)
-            dprintf(2, "%s: wrote block, finishing took %u bytes, crc 0x%04X\r\n", __func__, wait_bytes, crc_dma);
+            dprintf(2, "%s: wrote block, finishing took %u us, crc 0x%04X\r\n", __func__, timerawl_elapsed, crc_dma);
 
         if (0b00101 != response) {
             if (0b01011 == response)
