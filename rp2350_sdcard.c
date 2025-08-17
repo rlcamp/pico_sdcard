@@ -84,6 +84,59 @@ static uint32_t spi_receive_uint32be(void) {
     return __builtin_bswap32(ret);
 }
 
+static void wait_for_card_ready_long(void) {
+    while (1) {
+        spi_set_format(spi1, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+
+        const uint dma_tx = dma_claim_unused_channel(true);
+
+        dma_channel_config cfg = dma_channel_get_default_config(dma_tx);
+        channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
+        channel_config_set_dreq(&cfg, spi_get_dreq(spi1, true));
+        channel_config_set_write_increment(&cfg, false);
+        channel_config_set_read_increment(&cfg, false);
+        dma_channel_configure(dma_tx, &cfg, &spi_get_hw(spi1)->dr, &(uint16_t) { 0xFFFF }, 256, false);
+
+        dma_channel_acknowledge_irq1(dma_tx);
+
+        /* since we are using sevonpend, enable the irq source but disable in nvic */
+        dma_channel_set_irq1_enabled(dma_tx, true);
+        irq_set_enabled(DMA_IRQ_1, false);
+
+        /* start the dma channel */
+        dma_start_channel_mask(1u << dma_tx);
+
+        /* do other things and then sleep, while waiting for dma to finish */
+        while (dma_channel_is_busy(dma_tx))
+            yield();
+
+        /* disable and clear the irq that caused wfe to return due to sevonpend */
+        dma_channel_acknowledge_irq1(dma_tx);
+        dma_channel_set_irq1_enabled(dma_tx, false);
+        irq_clear(DMA_IRQ_1);
+
+        dma_channel_unclaim(dma_tx);
+
+        /* wait for the rest of the spi tx fifo to drain, with wfe inhibited because it
+         will not be accompanied by an interrupt that would wake the processor */
+        while (spi_is_busy(spi1)) {
+            __sev();
+            yield();
+        }
+
+        /* change format back to 8 bit */
+        spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+
+        /* read one byte response from card to see if it validated the crc */
+        uint8_t response;
+        spi_read_blocking(spi1, 0xff, &response, 1);
+
+        card_overhead_numerator += 513;
+
+        if (0xFF == response) break;
+    }
+}
+
 int spi_sd_init(void) {
     spi_init(spi1, 400000);
     gpio_set_function(10, GPIO_FUNC_SPI);
@@ -355,7 +408,7 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         response &= 0b11111;
 
         const unsigned timerawl_prior = timer_hw->timerawl;
-        wait_for_card_ready();
+        wait_for_card_ready_long();
         const unsigned timerawl_elapsed = timer_hw->timerawl - timerawl_prior;
 
         if (verbose >= 1)
