@@ -87,6 +87,51 @@ int ls(void) {
     return 0;
 }
 
+int record(void) {
+    FRESULT fres;
+    if ((fres = f_mount(fs, "", 1))) {
+        if (FR_NOT_READY == fres)
+            dprintf(2, "error: %s: card apparently not present\r\n", __func__);
+        else
+            dprintf(2, "error: %s: f_mount(): %d\r\n", __func__, fres);
+        return -1;
+    }
+
+    dprintf(2, "%s: mounted\r\n", __func__);
+
+    if (-1 == ls()) return -1;
+
+    /* loop until we get to the first available filename */
+    unsigned file_id = 0;
+    char path[] = "000000.txt";
+
+    while (1) {
+        set_first_value_in_string(path, file_id);
+        fres = f_open(fp, path, FA_CREATE_NEW | FA_WRITE);
+        if (FR_OK == fres)
+            break;
+        if (FR_EXIST == fres) {
+            file_id++;
+            continue;
+        } else {
+            dprintf(2, "%s: f_open(\"%s\"): %d\r\n", __func__, path, fres);
+            return -1;
+        }
+    }
+
+    dprintf(2, "%s: opened \"%s\"\r\n", __func__, path);
+
+    if (-1 == fputs_to_open_file(fp, "hello\n")) return -1;
+
+    if ((fres = f_close(fp))) {
+        dprintf(2, "%s: f_close(\"%s\"): %d\r\n", __func__, path, fres);
+        return -1;
+    }
+
+    dprintf(2, "%s: done\r\n", __func__);
+    return 0;
+}
+
 int main(void) {
 //    set_sys_clock_48mhz();
 //    set_sys_clock_hz(96000000, true);
@@ -102,50 +147,7 @@ int main(void) {
     stdio_uart_init();
     dprintf(2, "hello world\r\n");
 
-    do {
-        FRESULT fres;
-        if ((fres = f_mount(fs, "", 1))) {
-            if (FR_NOT_READY == fres)
-                dprintf(2, "error: %s: card apparently not present\r\n", __func__);
-            else
-                dprintf(2, "error: %s: f_mount(): %d\r\n", __func__, fres);
-            break;
-        }
-        dprintf(2, "%s: mounted\r\n", __func__);
-        if (-1 == ls()) break;
-
-        /* loop until we get to the first available filename */
-        unsigned file_id = 0;
-        char path[] = "000000.txt";
-
-        while (1) {
-            set_first_value_in_string(path, file_id);
-            fres = f_open(fp, path, FA_CREATE_NEW | FA_WRITE);
-            if (FR_OK == fres)
-                break;
-            if (FR_EXIST == fres) {
-                file_id++;
-                continue;
-            } else {
-                dprintf(2, "%s: f_open(\"%s\"): %d\r\n", __func__, path, fres);
-                break;
-            }
-        }
-
-        if (fres != FR_OK) break;
-
-        dprintf(2, "%s: opened \"%s\"\r\n", __func__, path);
-
-        if (-1 == fputs_to_open_file(fp, "hello\n")) break;
-
-        if ((fres = f_close(fp))) {
-            dprintf(2, "%s: f_close(\"%s\"): %d\r\n", __func__, path, fres);
-            break;
-        }
-
-        dprintf(2, "%s: done\r\n", __func__);
-
-    } while(0);
+    record();
 
     gpio_put(22, 0);
 
