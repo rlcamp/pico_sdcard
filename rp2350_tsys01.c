@@ -11,30 +11,32 @@ extern void lower_power_sleep_ms(unsigned);
 static uint16_t coefficients[5] = { };
 
 int tsys01_init(void) {
+    /* initialize the i2c bus and acquire a lock */
     i2c_request();
+
     if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x1E }, 1, false)) {
         i2c_release();
         return -1;
     }
 
+    /* do other tasks with the lock NOT held, and then go to low power, for an amount of
+     time required by the data sheet */
     i2c_unlock();
     lower_power_sleep_ms(10);
     i2c_lock();
 
+    /* clock out each of the calibration coefficients we need */
     for (size_t iprom = 0; iprom < 5; iprom++) {
-        if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0xA2 + 2 * iprom }, 1, false)) {
-            i2c_release();
-            return -1;
-        }
-
         uint16_t tmp;
-        if (-1 == i2c_read_blocking(i2c0, 0x77, (void *)&tmp, 2, false)) {
+        if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0xA2 + 2 * iprom }, 1, false) ||
+            -1 == i2c_read_blocking(i2c0, 0x77, (void *)&tmp, 2, false)) {
             i2c_release();
             return -1;
         }
         coefficients[4 - iprom] = __builtin_bswap16(tmp);
     }
 
+    /* done with i2c bus */
     i2c_release();
     return 0;
 }
@@ -50,13 +52,9 @@ int tsys01_read_thousandths(void) {
     lower_power_sleep_ms(10);
     i2c_lock();
 
-    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x00 }, 1, false)) {
-        i2c_release();
-        return INT_MIN;
-    }
-
     unsigned char bytes[3];
-    if (-1 == i2c_read_blocking(i2c0, 0x77, bytes, 3, false)) {
+    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x00 }, 1, false) ||
+        -1 == i2c_read_blocking(i2c0, 0x77, bytes, 3, false)) {
         i2c_release();
         return INT_MIN;
     }
