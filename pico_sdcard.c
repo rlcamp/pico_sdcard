@@ -318,6 +318,7 @@ int main(void) {
                              CLOCKS_WAKE_EN0_CLK_SYS_PIO0_BITS |
                              CLOCKS_WAKE_EN0_CLK_SYS_JTAG_BITS |
                              CLOCKS_WAKE_EN0_CLK_SYS_I2C1_BITS |
+                             CLOCKS_WAKE_EN0_CLK_SYS_I2C0_BITS | /* will be reenabled on demand */
                              CLOCKS_WAKE_EN0_CLK_SYS_HSTX_BITS |
                              CLOCKS_WAKE_EN0_CLK_HSTX_BITS |
                              CLOCKS_WAKE_EN0_CLK_SYS_ADC_BITS |
@@ -333,12 +334,6 @@ int main(void) {
     cooperative_uart_init();
 
     dprintf(2, "\r\nhello\r\n");
-
-    i2c_init(i2c0, 400000);
-    gpio_set_function(16, GPIO_FUNC_I2C);
-    gpio_set_function(17, GPIO_FUNC_I2C);
-    gpio_pull_up(16);
-    gpio_pull_up(17);
 
     ds3231_to_sys();
 

@@ -1,8 +1,12 @@
 #include "rp2350_cooperative_i2c.h"
 #include "RP2350.h"
+#include "hardware/i2c.h"
+#include "hardware/gpio.h"
+#include "hardware/clocks.h"
 
 /* intentionally cooperative only mutex-like thing, can be made actually thread safe but no need */
 static volatile unsigned char lock = 0;
+static volatile unsigned char users = 0;
 
 void i2c_lock(void) {
     while (lock) yield();
@@ -24,12 +28,26 @@ void i2c_unlock(void) {
 }
 
 void i2c_request(void) {
-    /* TODO: postpone i2c init until here if nobody was using it */
     i2c_lock();
+
+    if (!(users++)) {
+        clocks_hw->wake_en0 |= CLOCKS_WAKE_EN0_CLK_SYS_I2C0_BITS;
+        clocks_hw->sleep_en0 |= CLOCKS_SLEEP_EN0_CLK_SYS_I2C0_BITS;
+
+        i2c_init(i2c0, 400000);
+        gpio_set_function(16, GPIO_FUNC_I2C);
+        gpio_set_function(17, GPIO_FUNC_I2C);
+        gpio_pull_up(16);
+        gpio_pull_up(17);
+    }
 }
 
 void i2c_release(void) {
-    /* TODO: deinit i2c if nobody else still needs it */
+    if (!(--users)) {
+        i2c_deinit(i2c0);
+        clocks_hw->wake_en0 &= ~CLOCKS_WAKE_EN0_CLK_SYS_I2C0_BITS;
+        clocks_hw->sleep_en0 &= ~CLOCKS_SLEEP_EN0_CLK_SYS_I2C0_BITS;
+
+    }
     i2c_unlock();
 }
-
