@@ -37,6 +37,7 @@ add_executable(pico_sdcard
     rp2350_cooperative_i2c.c
     dprintf.c
     rp2350_ds3231.c
+    rp2350_tsys01.c
 )
 
 # pull in common dependencies
