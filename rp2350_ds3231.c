@@ -1,4 +1,5 @@
 #include "rp2350_ds3231.h"
+#include "rp2350_cooperative_i2c.h"
 
 #include "hardware/timer.h"
 #include "hardware/i2c.h"
@@ -8,13 +9,6 @@
 #include <stdio.h>
 #include <time.h>
 #include <string.h>
-
-extern void i2c_request(void);
-extern void i2c_release(void);
-extern void i2c_lock(void);
-extern void i2c_unlock(void);
-extern int i2c_lock_or_fail(void);
-extern void yield(void);
 
 unsigned long long unix_microseconds_at_ref;
 unsigned long long uptime_microseconds_at_ref;

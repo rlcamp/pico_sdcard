@@ -17,6 +17,7 @@
 #include "rp2350_sdcard.h"
 #include "cortex_m_cooperative_multitasking.h"
 #include "rp2350_cooperative_uart.h"
+#include "rp2350_cooperative_i2c.h"
 #include "rp2350_ds3231.h"
 
 #include <stdio.h>
@@ -40,38 +41,6 @@ static size_t estimate_child_stack_usage(const size_t B, const unsigned char sta
     for (size_t ib = 0; ib < B; ib++)
         if (stack[ib] != 0xFF) return B - ib;
     return 0;
-}
-
-/* intentionally cooperative only mutex-like thing, can be made actually thread safe but no need */
-static volatile unsigned char lock = 0;
-
-void i2c_lock(void) {
-    while (lock) yield();
-    lock = 1;
-}
-
-int i2c_lock_or_fail(void) {
-    if (lock) return -1;
-    lock = 1;
-    return 0;
-}
-
-void i2c_unlock(void) {
-    lock = 0;
-
-    /* inhibit the next wfe call, to make sure other threads get a chance to react to the
-     lock being released if they were waiting for it, before the processor sleeps */
-    __SEV();
-}
-
-void i2c_request(void) {
-    /* TODO: postpone i2c init until here if nobody was using it */
-    i2c_lock();
-}
-
-void i2c_release(void) {
-    /* TODO: deinit i2c if nobody else still needs it */
-    i2c_unlock();
 }
 
 static void set_first_value_in_string(char buf[], unsigned value) {

@@ -34,6 +34,7 @@ add_executable(pico_sdcard
     ffunicode.c
     cortex_m_cooperative_multitasking.c
     rp2350_cooperative_uart.c
+    rp2350_cooperative_i2c.c
     dprintf.c
     rp2350_ds3231.c
 )
