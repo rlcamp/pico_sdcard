@@ -1,4 +1,6 @@
 /* proof of concept data logger to test sd card code */
+
+/* lower level pico-sdk includes */
 #include "hardware/xosc.h"
 #include "hardware/structs/rosc.h"
 #include "hardware/pll.h"
@@ -11,20 +13,22 @@
 /* so that we can reset into bootloader on command */
 #include "pico/bootrom.h"
 
+/* for SEV and WFE */
 #include "RP2350.h"
 
-#include "ff.h"
-#include "rp2350_sdcard.h"
+/* other open source or project-agnostic includes by authors */
 #include "cortex_m_cooperative_multitasking.h"
+#include "rp2350_sdcard.h"
 #include "rp2350_cooperative_uart.h"
 #include "rp2350_cooperative_i2c.h"
 #include "rp2350_ds3231.h"
 #include "rp2350_tsys01.h"
 
+/* third party includes */
+#include "ff.h"
+
+/* c standard includes */
 #include <stdio.h>
-#include <string.h>
-#include <math.h>
-#include <limits.h>
 #include <stdlib.h>
 
 unsigned char verbose = 1;
