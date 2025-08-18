@@ -312,7 +312,16 @@ int record(void) {
 }
 
 void record_outer(void) {
+    gpio_init(22);
+    gpio_set_dir(22, GPIO_OUT);
+    gpio_put(22, 1);
+
+    lower_power_sleep_ms(10);
+
     record();
+
+    gpio_put(22, 0);
+    gpio_deinit(22);
 }
 
 int main(void) {
@@ -348,10 +357,6 @@ int main(void) {
     /* make sure we don't clock anything in sleep that wasn't clocked in wake */
     clocks_hw->sleep_en1 = clocks_hw->wake_en1;
     clocks_hw->sleep_en0 = clocks_hw->wake_en0;
-
-    gpio_init(22);
-    gpio_set_dir(22, GPIO_OUT);
-    gpio_put(22, 1);
 
     /* enable sevonpend so that we don't need a nearly empty isr */
     scb_hw->scr |= M33_SCR_SEVONPEND_BITS;
