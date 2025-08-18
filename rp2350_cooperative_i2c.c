@@ -4,6 +4,8 @@
 #include "hardware/gpio.h"
 #include "hardware/clocks.h"
 
+extern void yield(void);
+
 /* intentionally cooperative only mutex-like thing, can be made actually thread safe but no need */
 static volatile unsigned char lock = 0;
 static volatile unsigned char users = 0;

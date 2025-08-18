@@ -10,6 +10,8 @@
 #include <time.h>
 #include <string.h>
 
+extern void yield(void);
+
 unsigned long long unix_microseconds_at_ref;
 unsigned long long uptime_microseconds_at_ref;
 
