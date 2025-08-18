@@ -1,9 +1,9 @@
+/* proof of concept data logger to test sd card code */
 #include "hardware/xosc.h"
 #include "hardware/structs/rosc.h"
 #include "hardware/pll.h"
 #include "hardware/clocks.h"
 #include "hardware/sync.h"
-#include "hardware/uart.h"
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
 #include "hardware/i2c.h"
@@ -385,8 +385,4 @@ int main(void) {
         }
         yield();
     }
-
-    gpio_put(22, 0);
-
-    while (1) yield();
 }
