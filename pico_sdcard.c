@@ -1,4 +1,3 @@
-#include "pico/stdio_uart.h"
 #include "hardware/xosc.h"
 #include "hardware/structs/rosc.h"
 #include "hardware/pll.h"
@@ -9,9 +8,15 @@
 #include "hardware/timer.h"
 #include "hardware/i2c.h"
 
+/* so that we can reset into bootloader on command */
+#include "pico/bootrom.h"
+
 #include "RP2350.h"
+
 #include "ff.h"
 #include "rp2350_sdcard.h"
+#include "cortex_m_cooperative_multitasking.h"
+#include "rp2350_cooperative_uart.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -21,6 +26,22 @@
 #include <time.h>
 
 unsigned char verbose = 1;
+
+extern void * sbrk(ptrdiff_t);
+
+__attribute((noinline))
+static int estimate_free_ram_from_main_thread(void) {
+    /* this assumes it is being called in the main thread */
+    char here;
+    return (char *)&here - (char *)sbrk(0);
+}
+
+static size_t estimate_child_stack_usage(const size_t B, const unsigned char stack[restrict static B]) {
+    for (size_t ib = 0; ib < B; ib++)
+        if (stack[ib] != 0xFF) return B - ib;
+    return 0;
+}
+
 
 static void set_first_value_in_string(char buf[], unsigned value) {
     char * cursor = buf;
@@ -46,10 +67,6 @@ static int fputs_to_open_file(FIL * fp, const char * string) {
         return -1;
     }
     return 0;
-}
-
-void yield(void) {
-    __DSB(); __WFE();
 }
 
 void run_from_xosc(void) {
@@ -353,6 +370,10 @@ int record(void) {
     return 0;
 }
 
+void record_outer(void) {
+    record();
+}
+
 int main(void) {
     run_from_xosc();
 
@@ -394,8 +415,9 @@ int main(void) {
     /* enable sevonpend so that we don't need a nearly empty isr */
     scb_hw->scr |= M33_SCR_SEVONPEND_BITS;
 
-    stdio_uart_init();
-    dprintf(2, "hello world\r\n");
+    cooperative_uart_init();
+
+    dprintf(2, "\r\nhello\r\n");
 
     i2c_init(i2c0, 400000);
     gpio_set_function(16, GPIO_FUNC_I2C);
@@ -407,7 +429,48 @@ int main(void) {
 
     tsys01_init();
 
-    record();
+    static struct __attribute((aligned(8))) {
+        /* this needs to be enough to accommodate the deepest call stack needed
+         by a child task, PLUS any interrupt handlers if we are not using the
+         msp/psp switch to provide interrupt handlers with their own dedicated
+         call stack. this is probably still overkill */
+        unsigned char stack[4096 - 16];
+
+        struct child_context child;
+    } child_record;
+
+    /* purely for diagnostic purposes */
+    memset(child_record.stack, 0xFF, sizeof(child_record.stack));
+
+    child_start(&child_record.child, record_outer);
+
+    /* TODO: figure out why this is not responsive to the first line after boot */
+
+    /* loop on characters from uart */
+    while (1) {
+        const char * line = get_line_from_uart();
+
+        /* if we got a complete line... */
+        if (line) {
+            dprintf(2, "%% %s\r\n", line);
+
+            if (!strcmp(line, "flash")) {
+                dprintf(2, "resetting into bootloader\r\n");
+                uart_tx_wait_blocking_with_yield();
+                rom_reset_usb_boot_extra(-1, 0, false);
+            }
+            else if (!strcmp(line, "reset"))
+                NVIC_SystemReset();
+            else if (!strcmp(line, "mem")) {
+                extern unsigned char end[]; /* provided by linker script, used by sbrk */
+                dprintf(2, "%s: record child stack high water: %d bytes\r\n", __func__,
+                        estimate_child_stack_usage(sizeof(child_record.stack), child_record.stack));
+                dprintf(2, "%s: heap usage high water: %d bytes\r\n", __func__, (uintptr_t)sbrk(0) - (uintptr_t)end);
+                dprintf(2, "%s: free ram at least %d bytes\r\n", __func__, estimate_free_ram_from_main_thread());
+            }
+        }
+        yield();
+    }
 
     gpio_put(22, 0);
 

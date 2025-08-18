@@ -32,6 +32,9 @@ add_executable(pico_sdcard
     diskio.c
     ff.c
     ffunicode.c
+    cortex_m_cooperative_multitasking.c
+    rp2350_cooperative_uart.c
+    dprintf.c
 )
 
 # pull in common dependencies
