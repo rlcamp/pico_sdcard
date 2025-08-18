@@ -390,8 +390,6 @@ int main(void) {
 
     child_start(&child_record.child, record_outer);
 
-    /* TODO: figure out why this is not responsive to the first line after boot */
-
     /* loop on characters from uart */
     while (1) {
         const char * line = get_line_from_uart();

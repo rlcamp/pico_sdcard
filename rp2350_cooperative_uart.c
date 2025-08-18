@@ -155,6 +155,7 @@ const char * get_line_from_uart(void) {
 void cooperative_uart_init(void) {
     gpio_set_function(0, UART_FUNCSEL_NUM(uart0, 0));
     gpio_set_function(1, UART_FUNCSEL_NUM(uart0, 1));
+    gpio_pull_up(1);
 
     uart_init(uart0, 115200);
     irq_set_exclusive_handler(UART_IRQ_NUM(uart0), uart0_handler);
