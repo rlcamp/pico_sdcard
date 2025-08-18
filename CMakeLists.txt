@@ -35,6 +35,7 @@ add_executable(pico_sdcard
     cortex_m_cooperative_multitasking.c
     rp2350_cooperative_uart.c
     dprintf.c
+    rp2350_ds3231.c
 )
 
 # pull in common dependencies
