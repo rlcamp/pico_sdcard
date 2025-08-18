@@ -42,6 +42,37 @@ static size_t estimate_child_stack_usage(const size_t B, const unsigned char sta
     return 0;
 }
 
+/* intentionally cooperative only mutex-like thing, can be made actually thread safe but no need */
+static volatile unsigned char lock = 0;
+
+void i2c_lock(void) {
+    while (lock) yield();
+    lock = 1;
+}
+
+int i2c_lock_or_fail(void) {
+    if (lock) return -1;
+    lock = 1;
+    return 0;
+}
+
+void i2c_unlock(void) {
+    lock = 0;
+
+    /* inhibit the next wfe call, to make sure other threads get a chance to react to the
+     lock being released if they were waiting for it, before the processor sleeps */
+    __SEV();
+}
+
+void i2c_request(void) {
+    /* TODO: postpone i2c init until here if nobody was using it */
+    i2c_lock();
+}
+
+void i2c_release(void) {
+    /* TODO: deinit i2c if nobody else still needs it */
+    i2c_unlock();
+}
 
 static void set_first_value_in_string(char buf[], unsigned value) {
     char * cursor = buf;
@@ -112,31 +143,57 @@ static void lower_power_sleep_ms(const unsigned delay_ms) {
 }
 
 static int tsys01_init(void) {
-    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x1E }, 1, false)) return -1;
-
-    lower_power_sleep_ms(10);
-
-    for (size_t iprom = 0; iprom < 5; iprom++) {
-        if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0xA2 + 2 * iprom }, 1, false)) return -1;
-
-        uint16_t tmp;
-        if (-1 == i2c_read_blocking(i2c0, 0x77, (void *)&tmp, 2, false)) return -1;
-        coefficients[4 - iprom] = __builtin_bswap16(tmp);
-        dprintf(2, "%s: k%u = %u\r\n", __func__, 4 - iprom, coefficients[4 - iprom]);
+    i2c_request();
+    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x1E }, 1, false)) {
+        i2c_release();
+        return -1;
     }
 
+    i2c_unlock();
+    lower_power_sleep_ms(10);
+    i2c_lock();
+
+    for (size_t iprom = 0; iprom < 5; iprom++) {
+        if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0xA2 + 2 * iprom }, 1, false)) {
+            i2c_release();
+            return -1;
+        }
+
+        uint16_t tmp;
+        if (-1 == i2c_read_blocking(i2c0, 0x77, (void *)&tmp, 2, false)) {
+            i2c_release();
+            return -1;
+        }
+        coefficients[4 - iprom] = __builtin_bswap16(tmp);
+    }
+
+    i2c_release();
     return 0;
 }
 
 static int tsys01_read_thousandths(void) {
-    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x48 }, 1, false)) return INT_MIN;
+    i2c_request();
+    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x48 }, 1, false)) {
+        i2c_release();
+        return INT_MIN;
+    }
 
+    i2c_unlock();
     lower_power_sleep_ms(10);
+    i2c_lock();
 
-    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x00 }, 1, false)) return INT_MIN;
+    if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x00 }, 1, false)) {
+        i2c_release();
+        return INT_MIN;
+    }
 
     unsigned char bytes[3];
-    if (-1 == i2c_read_blocking(i2c0, 0x77, bytes, 3, false)) return INT_MIN;
+    if (-1 == i2c_read_blocking(i2c0, 0x77, bytes, 3, false)) {
+        i2c_release();
+        return INT_MIN;
+    }
+
+    i2c_release();
 
     const uint32_t adc24 = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
 
@@ -336,15 +393,21 @@ int main(void) {
 
         /* if we got a complete line... */
         if (line) {
+            const unsigned long long uptime_now = timer_time_us_64(timer_hw);
             dprintf(2, "%% %s\r\n", line);
 
-            if (!strcmp(line, "flash")) {
+            if (0 == gpzda_to_sys(line, 115200, uptime_now)) {
+                dprintf(1, "%s: got valid timestamp\r\n", __func__);
+            }
+            else if (!strcmp(line, "flash")) {
                 dprintf(2, "resetting into bootloader\r\n");
                 uart_tx_wait_blocking_with_yield();
                 rom_reset_usb_boot_extra(-1, 0, false);
             }
-            else if (!strcmp(line, "reset"))
-                NVIC_SystemReset();
+            else if (!strcmp(line, "hctosys"))
+                ds3231_to_sys();
+            else if (!strcmp(line, "systohc"))
+                sys_to_ds3231();
             else if (!strcmp(line, "mem")) {
                 extern unsigned char end[]; /* provided by linker script, used by sbrk */
                 dprintf(2, "%s: record child stack high water: %d bytes\r\n", __func__,
@@ -359,5 +422,4 @@ int main(void) {
     gpio_put(22, 0);
 
     while (1) yield();
-    NVIC_SystemReset();
 }
