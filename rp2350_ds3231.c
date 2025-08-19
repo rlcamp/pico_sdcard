@@ -308,3 +308,17 @@ int gpzda_to_sys(const char * line, const unsigned baud_rate, const unsigned lon
 
     return 0;
 }
+
+uint32_t get_fattime(void) {
+    const unsigned long long unix_microseconds = timer_time_us_64(timer_hw) - uptime_microseconds_at_ref + unix_microseconds_at_ref;
+
+    struct tm out;
+    if (!gmtime_r(&(time_t) { unix_microseconds / 1000000ULL }, &out)) return 0;
+
+    return ((out.tm_year - 80) << 25U |
+            (out.tm_mon + 1) << 21U |
+            out.tm_mday << 16U |
+            out.tm_hour << 11U |
+            out.tm_min << 5U |
+            out.tm_sec >> 1U);
+}
