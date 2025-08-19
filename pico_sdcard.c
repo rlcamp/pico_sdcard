@@ -301,7 +301,10 @@ int main(void) {
 
     dprintf(2, "\r\nhello\r\n");
 
-    ds3231_to_sys();
+    if (-1 == ds3231_to_sys())
+        dprintf(2, "%s: could not read ds3231\r\n", __func__);
+    else
+        dprintf(2, "%s: successfully read ds3231\r\n", __func__);
 
     if (-1 == tsys01_init())
         dprintf(2, "%s: could not initialize tsys01\r\n", __func__);
