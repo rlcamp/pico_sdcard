@@ -12,17 +12,14 @@
 extern void lower_power_sleep_ms(unsigned);
 
 static int read_three_bytes(unsigned char bytes[3], unsigned char addr) {
-    if (-1 == i2c_write_blocking(i2c0, 0x40, &addr, 1, false))
-        return -1;
+    if (-1 == i2c_write_blocking(i2c0, 0x40, &addr, 1, false)) return -1;
 
     i2c_unlock();
     lower_power_sleep_ms(2);
     i2c_lock();
 
-    if (-1 == i2c_read_blocking(i2c0, 0x40, bytes, 3, false)) {
-        i2c_release();
-        return -1;
-    }
+    if (-1 == i2c_read_blocking(i2c0, 0x40, bytes, 3, false)) return -1;
+
     return 0;
 }
 
