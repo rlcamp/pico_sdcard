@@ -222,6 +222,11 @@ int record(void) {
         return -1;
     }
 
+    if ((fres = f_unmount(""))) {
+        dprintf(2, "error: %s: f_unmount(): %d\r\n", __func__, fres);
+        return -1;
+    }
+
     dprintf(2, "%s: done\r\n", __func__);
     return 0;
 }
