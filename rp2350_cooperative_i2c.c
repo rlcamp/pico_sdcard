@@ -36,7 +36,7 @@ void i2c_request(void) {
         clocks_hw->wake_en0 |= CLOCKS_WAKE_EN0_CLK_SYS_I2C0_BITS;
         clocks_hw->sleep_en0 |= CLOCKS_SLEEP_EN0_CLK_SYS_I2C0_BITS;
 
-        i2c_init(i2c0, 400000);
+        i2c_init(i2c0, 100000);
         gpio_set_function(16, GPIO_FUNC_I2C);
         gpio_set_function(17, GPIO_FUNC_I2C);
         gpio_pull_up(16);
