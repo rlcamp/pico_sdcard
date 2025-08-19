@@ -351,24 +351,32 @@ int main(void) {
             const unsigned long long uptime_now = timer_time_us_64(timer_hw);
             dprintf(2, "%% %s\r\n", line);
 
-            if (0 == gpzda_to_sys(line, 115200, uptime_now)) {
-                dprintf(1, "%s: got valid timestamp\r\n", __func__);
-            }
+            if (0 == gpzda_to_sys(line, 115200, uptime_now))
+                dprintf(2, "%s: got valid timestamp\r\n", __func__);
+
+            else if (!strcmp(line, "start") && !child_is_running(&child_record.child))
+                child_start(&child_record.child, record_outer);
+
+            else if (!strcmp(line, "stop"))
+                stop_requested = 1;
+
+            else if (line == strstr(line, "ecezo ") && !child_is_running(&child_record.child))
+                ecezo_command(line + 6);
+
             else if (!strcmp(line, "flash")) {
                 dprintf(2, "resetting into bootloader\r\n");
                 uart_tx_wait_blocking_with_yield();
                 rom_reset_usb_boot_extra(-1, 0, false);
             }
+
             else if (!strcmp(line, "hctosys"))
                 ds3231_to_sys();
             else if (!strcmp(line, "systohc"))
                 sys_to_ds3231();
-            else if (!strcmp(line, "stop"))
-                stop_requested = 1;
-            else if (line == strstr(line, "ecezo ") && !child_is_running(&child_record.child))
-                ecezo_command(line + 6);
-            else if (!strcmp(line, "start") && !child_is_running(&child_record.child))
-                child_start(&child_record.child, record_outer);
+
+            else if (!strcmp(line, "uptime"))
+                dprintf(2, "%s: uptime %lu\r\n", __func__, (unsigned long)(uptime_now / 1000000ULL));
+
             else if (!strcmp(line, "mem")) {
                 extern unsigned char end[]; /* provided by linker script, used by sbrk */
                 dprintf(2, "%s: record child stack high water: %d bytes\r\n", __func__,
