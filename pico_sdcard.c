@@ -1,3 +1,7 @@
+#ifndef PROGNAME
+#define PROGNAME "pico_sdcard"
+#endif
+
 /* proof of concept data logger to test sd card code */
 
 /* lower level pico-sdk includes */
@@ -312,20 +316,20 @@ int main(void) {
     dprintf(2, "\r\nhello\r\n");
 
     if (-1 == ds3231_to_sys())
-        dprintf(2, "%s: could not read ds3231\r\n", __func__);
+        dprintf(2, "%s: could not read ds3231\r\n", PROGNAME);
     else
-        dprintf(2, "%s: successfully read ds3231\r\n", __func__);
+        dprintf(2, "%s: successfully read ds3231\r\n", PROGNAME);
 
     if (-1 == tsys01_init())
-        dprintf(2, "%s: could not initialize tsys01\r\n", __func__);
+        dprintf(2, "%s: could not initialize tsys01\r\n", PROGNAME);
 
     if (-1 == kellerld_init())
-        dprintf(2, "%s: could not initialize kellerld\r\n", __func__);
+        dprintf(2, "%s: could not initialize kellerld\r\n", PROGNAME);
 
     if (-1 == ecezo_init())
-        dprintf(2, "%s: could not initialize ecezo\r\n", __func__);
+        dprintf(2, "%s: could not initialize ecezo\r\n", PROGNAME);
     else
-        dprintf(2, "%s: successfully initted ecezo\r\n", __func__);
+        dprintf(2, "%s: successfully initted ecezo\r\n", PROGNAME);
 
     static struct __attribute((aligned(8))) {
         /* this needs to be enough to accommodate the deepest call stack needed
@@ -352,7 +356,7 @@ int main(void) {
             dprintf(2, "%% %s\r\n", line);
 
             if (0 == gpzda_to_sys(line, 115200, uptime_now))
-                dprintf(2, "%s: got valid timestamp\r\n", __func__);
+                dprintf(2, "%s: got valid timestamp\r\n", PROGNAME);
 
             else if (!strcmp(line, "start") && !child_is_running(&child_record.child))
                 child_start(&child_record.child, record_outer);
@@ -364,7 +368,7 @@ int main(void) {
                 ecezo_command(line + 6);
 
             else if (!strcmp(line, "flash")) {
-                dprintf(2, "resetting into bootloader\r\n");
+                dprintf(2, "%s: resetting into bootloader\r\n", PROGNAME);
                 uart_tx_wait_blocking_with_yield();
                 rom_reset_usb_boot_extra(-1, 0, false);
             }
@@ -375,14 +379,14 @@ int main(void) {
                 sys_to_ds3231();
 
             else if (!strcmp(line, "uptime"))
-                dprintf(2, "%s: uptime %lu\r\n", __func__, (unsigned long)(uptime_now / 1000000ULL));
+                dprintf(2, "%s: uptime %lu\r\n", PROGNAME, (unsigned long)(uptime_now / 1000000ULL));
 
             else if (!strcmp(line, "mem")) {
                 extern unsigned char end[]; /* provided by linker script, used by sbrk */
-                dprintf(2, "%s: record child stack high water: %d bytes\r\n", __func__,
+                dprintf(2, "%s: record child stack high water: %d bytes\r\n", PROGNAME,
                         estimate_child_stack_usage(sizeof(child_record.stack), child_record.stack));
-                dprintf(2, "%s: heap usage high water: %d bytes\r\n", __func__, (uintptr_t)sbrk(0) - (uintptr_t)end);
-                dprintf(2, "%s: free ram at least %d bytes\r\n", __func__, estimate_free_ram_from_main_thread());
+                dprintf(2, "%s: heap usage high water: %d bytes\r\n", PROGNAME, (uintptr_t)sbrk(0) - (uintptr_t)end);
+                dprintf(2, "%s: free ram at least %d bytes\r\n", PROGNAME, estimate_free_ram_from_main_thread());
             }
         }
         yield();
