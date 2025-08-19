@@ -23,6 +23,7 @@
 #include "rp2350_cooperative_i2c.h"
 #include "rp2350_ds3231.h"
 #include "rp2350_tsys01.h"
+#include "rp2350_kellerld.h"
 
 /* third party includes */
 #include "ff.h"
@@ -160,7 +161,7 @@ int record(void) {
     timer_hw->alarm[alarm_num] = timer_hw->timerawl + period_microseconds;
 
     /* wild guess of line format: time, temperature, ... */
-    char line[] = "0123456789.000,+000.000,+000.000,+000.000\n";
+    char line[] = "0123456789.000,+000.000,+0000.000,+000.000\n";
 
     for (size_t iline = 0; iline < 30; iline++) {
         /* run other tasks or low power sleep until next alarm interrupt */
@@ -195,6 +196,16 @@ int record(void) {
             set_first_value_in_string(line + 16, a);
             set_first_value_in_string(line + 20, b);
             line[15] = temp_thousandths < 0 ? '-' : '+';
+        }
+
+        long pressure_millibar;
+        if (kellerld_read(&pressure_millibar, NULL) != -1) {
+            const unsigned long abs_mbar = labs(pressure_millibar);
+            const unsigned long c = abs_mbar / 1000;
+            const unsigned long d = abs_mbar % 1000;
+            set_first_value_in_string(line + 25, c);
+            set_first_value_in_string(line + 30, d);
+            line[24] = pressure_millibar < 0 ? '-' : '+';
         }
 
         /* TODO: populate remaining fields */
@@ -273,6 +284,9 @@ int main(void) {
     ds3231_to_sys();
 
     tsys01_init();
+
+    if (-1 == kellerld_init())
+        dprintf(2, "%s: could not initialize kellerld\r\n", __func__);
 
     static struct __attribute((aligned(8))) {
         /* this needs to be enough to accommodate the deepest call stack needed

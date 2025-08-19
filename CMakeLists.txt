@@ -38,6 +38,7 @@ add_executable(pico_sdcard
     dprintf.c
     rp2350_ds3231.c
     rp2350_tsys01.c
+    rp2350_kellerld.c
 )
 
 # pull in common dependencies
