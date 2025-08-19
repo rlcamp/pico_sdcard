@@ -283,7 +283,8 @@ int main(void) {
 
     ds3231_to_sys();
 
-    tsys01_init();
+    if (-1 == tsys01_init())
+        dprintf(2, "%s: could not initialize tsys01\r\n", __func__);
 
     if (-1 == kellerld_init())
         dprintf(2, "%s: could not initialize kellerld\r\n", __func__);
