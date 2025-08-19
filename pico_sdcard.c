@@ -33,6 +33,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/* need to be able to tell fatfs internals that it will have to reinit the card */
+extern unsigned char diskio_initted;
+
 unsigned char verbose = 1;
 
 extern void * sbrk(ptrdiff_t);
@@ -258,6 +261,9 @@ void record_outer(void) {
     lower_power_sleep_ms(10);
 
     record();
+
+    /* make sure we will reinit when we get here next */
+    diskio_initted = 0;
 
     gpio_put(22, 0);
     gpio_deinit(22);
