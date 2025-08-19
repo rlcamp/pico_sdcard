@@ -119,7 +119,11 @@ void lower_power_sleep_ms(const unsigned delay_ms) {
 __attribute((aligned(4))) static FATFS * fs = &(static FATFS) { };
 __attribute((aligned(4))) static FIL * fp = &(static FIL) { };
 
+volatile char stop_requested = 0;
+
 int record(void) {
+    stop_requested = 0;
+
     FRESULT fres;
     if ((fres = f_mount(fs, "", 1))) {
         if (FR_NOT_READY == fres)
@@ -167,7 +171,7 @@ int record(void) {
     /* wild guess of line format: time, temperature, ... */
     char line[] = "0123456789.000,+000.000,+0000.000,+00000.000\n";
 
-    for (size_t iline = 0; iline < 30; iline++) {
+    for (size_t iline = 0; !stop_requested; iline++) {
         /* run other tasks or low power sleep until next alarm interrupt */
         while (!(timer_hw->intr & (1U << alarm_num)))
             yield();
@@ -353,6 +357,10 @@ int main(void) {
                 ds3231_to_sys();
             else if (!strcmp(line, "systohc"))
                 sys_to_ds3231();
+            else if (!strcmp(line, "stop"))
+                stop_requested = 1;
+            else if (!strcmp(line, "start") && !child_is_running(&child_record.child))
+                child_start(&child_record.child, record_outer);
             else if (!strcmp(line, "mem")) {
                 extern unsigned char end[]; /* provided by linker script, used by sbrk */
                 dprintf(2, "%s: record child stack high water: %d bytes\r\n", __func__,
