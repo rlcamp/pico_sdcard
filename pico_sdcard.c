@@ -24,6 +24,7 @@
 #include "rp2350_ds3231.h"
 #include "rp2350_tsys01.h"
 #include "rp2350_kellerld.h"
+#include "rp2350_ecezo.h"
 
 /* third party includes */
 #include "ff.h"
@@ -160,8 +161,11 @@ int record(void) {
     /* first tick will be one interval from now */
     timer_hw->alarm[alarm_num] = timer_hw->timerawl + period_microseconds;
 
+    /* need to request the first read >= 600 ms before we need it */
+    ecezo_request_read();
+
     /* wild guess of line format: time, temperature, ... */
-    char line[] = "0123456789.000,+000.000,+0000.000,+000.000\n";
+    char line[] = "0123456789.000,+000.000,+0000.000,+00000.000\n";
 
     for (size_t iline = 0; iline < 30; iline++) {
         /* run other tasks or low power sleep until next alarm interrupt */
@@ -208,12 +212,23 @@ int record(void) {
             line[24] = pressure_millibar < 0 ? '-' : '+';
         }
 
-        /* TODO: populate remaining fields */
+        long conductivity_thousandths;
+        if (ecezo_finish_read(&conductivity_thousandths) != -1) {
+            const unsigned long abs_cond = labs(conductivity_thousandths);
+            const unsigned long a = abs_cond / 1000;
+            const unsigned long b = abs_cond % 1000;
+            set_first_value_in_string(line + 35, a);
+            set_first_value_in_string(line + 41, b);
+            line[34] = conductivity_thousandths < 0 ? '-' : '+';
+        }
 
         /* this will usually return immediately, occasionally it will internally yield() */
         if (-1 == fputs_to_open_file(fp, line)) return -1;
 
         dprintf(2, "%s", line);
+
+        /* need to request that the next ecezo read be started because it takes 600 ms */
+        ecezo_request_read();
     }
     dprintf(2, "\r\n");
 
@@ -293,6 +308,11 @@ int main(void) {
 
     if (-1 == kellerld_init())
         dprintf(2, "%s: could not initialize kellerld\r\n", __func__);
+
+    if (-1 == ecezo_init())
+        dprintf(2, "%s: could not initialize ecezo\r\n", __func__);
+    else
+        dprintf(2, "%s: successfully initted ecezo\r\n", __func__);
 
     static struct __attribute((aligned(8))) {
         /* this needs to be enough to accommodate the deepest call stack needed
