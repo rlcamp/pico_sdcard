@@ -41,11 +41,11 @@ int tsys01_init(void) {
     return 0;
 }
 
-int tsys01_read_thousandths(void) {
+int tsys01_read(long * temp_thousandths_p) {
     i2c_request();
     if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x48 }, 1, false)) {
         i2c_release();
-        return INT_MIN;
+        return -1;
     }
 
     i2c_unlock();
@@ -56,7 +56,7 @@ int tsys01_read_thousandths(void) {
     if (-1 == i2c_write_blocking(i2c0, 0x77, &(uint8_t){ 0x00 }, 1, false) ||
         -1 == i2c_read_blocking(i2c0, 0x77, bytes, 3, false)) {
         i2c_release();
-        return INT_MIN;
+        return -1;
     }
 
     i2c_release();
@@ -75,6 +75,7 @@ int tsys01_read_thousandths(void) {
                         -2.0f * coefficients[2] * 1e-11f * adc16_2 +
                         +1.0f * coefficients[1] *  1e-6f * adc16 +
                         -1.5f * coefficients[0] *  1e-2f);
-    return lrintf(temp * 1e3f);
+    *temp_thousandths_p = lrintf(temp * 1e3f);
+    return 0;
 }
 

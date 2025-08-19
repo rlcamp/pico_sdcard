@@ -186,14 +186,16 @@ int record(void) {
         set_first_value_in_string(line + 0, now_seconds_portion);
         set_first_value_in_string(line + 11, now_milliseconds_portion);
 
-        const int temp_thousandths = tsys01_read_thousandths();
-        const unsigned long abs_thousandths = labs(temp_thousandths);
-        const unsigned long a = abs_thousandths / 1000;
-        const unsigned long b = abs_thousandths % 1000;
+        long temp_thousandths;
+        if (tsys01_read(&temp_thousandths) != -1) {
+            const unsigned long abs_thousandths = labs(temp_thousandths);
+            const unsigned long a = abs_thousandths / 1000;
+            const unsigned long b = abs_thousandths % 1000;
 
-        set_first_value_in_string(line + 16, a);
-        set_first_value_in_string(line + 20, b);
-        line[15] = temp_thousandths < 0 ? '-' : '+';
+            set_first_value_in_string(line + 16, a);
+            set_first_value_in_string(line + 20, b);
+            line[15] = temp_thousandths < 0 ? '-' : '+';
+        }
 
         /* TODO: populate remaining fields */
 
