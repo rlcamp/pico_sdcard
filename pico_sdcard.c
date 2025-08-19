@@ -365,6 +365,8 @@ int main(void) {
                 sys_to_ds3231();
             else if (!strcmp(line, "stop"))
                 stop_requested = 1;
+            else if (line == strstr(line, "ecezo ") && !child_is_running(&child_record.child))
+                ecezo_command(line + 6);
             else if (!strcmp(line, "start") && !child_is_running(&child_record.child))
                 child_start(&child_record.child, record_outer);
             else if (!strcmp(line, "mem")) {

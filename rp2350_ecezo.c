@@ -11,9 +11,9 @@
 
 extern void lower_power_sleep_ms(unsigned);
 
-static int get_response_string(char buf[32]) {
+static int get_response_string(char buf[], const size_t sizeof_buf) {
     char * cur = buf;
-    for (; cur < buf + 32; cur++) {
+    for (; cur < buf + sizeof_buf; cur++) {
         if (-1 == i2c_read_burst_blocking(i2c0, 0x64, (void *)cur, 1))
             return -1;
 
@@ -37,7 +37,7 @@ int ecezo_init(void) {
         i2c_lock();
 
         char buf[32];
-        if (-1 == get_response_string(buf)) break;
+        if (-1 == get_response_string(buf, sizeof(buf))) break;
 
         dprintf(2, "%s: %s\r\n", __func__, buf + 1);
 
@@ -69,7 +69,7 @@ int ecezo_finish_read(long * conductivity_thousandths_p) {
     i2c_request();
 
     char buf[32];
-    if (-1 == get_response_string(buf)) {
+    if (-1 == get_response_string(buf, sizeof(buf))) {
         i2c_release();
         return -1;
     }
@@ -83,5 +83,29 @@ int ecezo_finish_read(long * conductivity_thousandths_p) {
 
     *conductivity_thousandths_p = lrintf(conductivity);
 
+    return 0;
+}
+
+int ecezo_command(const char * cmd) {
+    i2c_request();
+
+    if (-1 == i2c_write_blocking(i2c0, 0x64, (void *)cmd, strlen(cmd), false)) {
+        i2c_release();
+        return -1;
+    }
+
+    i2c_unlock();
+    lower_power_sleep_ms(600);
+    i2c_lock();
+
+    char buf[128];
+    if (-1 == get_response_string(buf, sizeof(buf))) {
+        i2c_release();
+        return -1;
+    }
+
+    dprintf(2, "%s: %s\r\n", __func__, buf + 1);
+
+    i2c_release();
     return 0;
 }
