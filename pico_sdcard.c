@@ -29,6 +29,7 @@
 #include "rp2350_tsys01.h"
 #include "rp2350_kellerld.h"
 #include "rp2350_ecezo.h"
+#include "rp2350_bme280.h"
 
 /* third party includes */
 #include "ff.h"
@@ -273,6 +274,29 @@ void record_outer(void) {
     gpio_deinit(22);
 }
 
+static int bme280_read_and_print(void) {
+    long temp_hundredths;
+    unsigned long pressure_256ths, humidity_1024ths;
+    if (-1 == bme280_read(&temp_hundredths, &pressure_256ths, &humidity_1024ths)) return -1;
+
+    const unsigned long pressure_tenths = (pressure_256ths * 10ULL + 128) / 256;
+    const unsigned long pressure_int = pressure_tenths / 10;
+    const unsigned pressure_frac = pressure_tenths % 10;
+
+    const unsigned long temp_abs_hundredths = labs(temp_hundredths);
+    const long temp_int = (temp_abs_hundredths / 100) * (temp_hundredths < 0 ? -1 : 1);
+    const unsigned temp_frac = temp_abs_hundredths % 100;
+
+    const unsigned long humidity_thousandths = (humidity_1024ths * 1000UL + 512) / 1024;
+    const unsigned long humidity_int = humidity_thousandths / 1000;
+    const unsigned humidity_frac = humidity_thousandths % 1000;
+
+    dprintf(2, "%s: %ld.%02u deg C, %lu.%01u Pa, %lu.%03u%% humidity\r\n", __func__,
+            temp_int, temp_frac, pressure_int, pressure_frac, humidity_int, humidity_frac);
+
+    return 0;
+}
+
 int main(void) {
     run_from_xosc();
 
@@ -331,6 +355,13 @@ int main(void) {
     else
         dprintf(2, "%s: successfully initted ecezo\r\n", PROGNAME);
 
+    if (-1 == bme280_init())
+        dprintf(2, "%s: could not initialize bme280\r\n", PROGNAME);
+    else {
+        dprintf(2, "%s: successfully initted bme280\r\n", PROGNAME);
+        bme280_read_and_print();
+    }
+
     static struct __attribute((aligned(8))) {
         /* this needs to be enough to accommodate the deepest call stack needed
          by a child task, PLUS any interrupt handlers if we are not using the
@@ -377,6 +408,8 @@ int main(void) {
                 ds3231_to_sys();
             else if (!strcmp(line, "systohc"))
                 sys_to_ds3231();
+            else if (!strcmp(line, "bme280"))
+                bme280_read_and_print();
 
             else if (!strcmp(line, "uptime"))
                 dprintf(2, "%s: uptime %lu\r\n", PROGNAME, (unsigned long)(uptime_now / 1000000ULL));
