@@ -501,6 +501,11 @@ int main(void) {
             else if (!strcmp(line, "uptime"))
                 dprintf(2, "%s: uptime %lu\r\n", PROGNAME, (unsigned long)(uptime_now / 1000000ULL));
 
+            else if (!strcmp(line, "tasks"))
+                dprintf(2, PROGNAME ": child tasks running: sample: %u, record: %u\r\n",
+                        child_is_running(&child_record.child),
+                        child_is_running(&child_sample.child));
+
             else if (!strcmp(line, "mem")) {
                 extern unsigned char end[]; /* provided by linker script, used by sbrk */
                 dprintf(2, "%s: sample child stack high water: %d bytes\r\n", PROGNAME,
