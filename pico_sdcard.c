@@ -129,12 +129,16 @@ __attribute((aligned(4))) static FATFS * fs = &(static FATFS) { };
 __attribute((aligned(4))) static FIL * fp = &(static FIL) { };
 
 /* length-two ring buffer populated by one task and consumed by zero or more others */
+#define SAMPLE_RING_BUFFER_COUNT 4
+_Static_assert(!(SAMPLE_RING_BUFFER_COUNT & (SAMPLE_RING_BUFFER_COUNT - 1)), "ring buffer must be a power of two");
+
 static struct record {
     unsigned long long unix_microseconds;
     long temp_thousandths;
     long pressure_millibar;
     unsigned long conductivity_thousandths;
-} records[2];
+} records[SAMPLE_RING_BUFFER_COUNT];
+
 static size_t irec_written = 0;
 
 /* this gets incremented by anything that wants the sample data to be flowing. currently,
@@ -194,7 +198,7 @@ static void sample(void) {
         /* increment and rearm the alarm */
         timer_hw->alarm[alarm_num] += period_microseconds;
 
-        struct record * slot = records + irec_written % 2;
+        struct record * slot = records + irec_written % SAMPLE_RING_BUFFER_COUNT;
         memset(slot, 0, sizeof(struct record));
 
         slot->unix_microseconds = uptime_now - uptime_microseconds_at_ref + unix_microseconds_at_ref;
@@ -272,7 +276,7 @@ int record(void) {
         /* before rearming timer, check whether we should stop */
         if (stop_requested) break;
 
-        const struct record * slot = records + irec_read % 2;
+        const struct record * slot = records + irec_read % SAMPLE_RING_BUFFER_COUNT;
         irec_read++;
 
         const unsigned long long now = slot->unix_microseconds;
