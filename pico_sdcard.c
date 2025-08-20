@@ -283,34 +283,25 @@ int record(void) {
         set_first_value_in_string(line + 0, now_seconds_portion);
         set_first_value_in_string(line + 11, now_milliseconds_portion);
 
-        const long temp_thousandths = slot->temp_thousandths;
-        {
-            const unsigned long abs_thousandths = labs(temp_thousandths);
-            const unsigned long a = abs_thousandths / 1000;
-            const unsigned long b = abs_thousandths % 1000;
+        const unsigned long abs_thousandths = labs(slot->temp_thousandths);
+        const unsigned long a = abs_thousandths / 1000;
+        const unsigned long b = abs_thousandths % 1000;
 
-            set_first_value_in_string(line + 16, a);
-            set_first_value_in_string(line + 20, b);
-            line[15] = temp_thousandths < 0 ? '-' : '+';
-        }
+        set_first_value_in_string(line + 16, a);
+        set_first_value_in_string(line + 20, b);
+        line[15] = slot->temp_thousandths < 0 ? '-' : '+';
 
-        const long pressure_millibar = slot->pressure_millibar;
-        {
-            const unsigned long abs_mbar = labs(pressure_millibar);
-            const unsigned long c = abs_mbar / 1000;
-            const unsigned long d = abs_mbar % 1000;
-            set_first_value_in_string(line + 25, c);
-            set_first_value_in_string(line + 30, d);
-            line[24] = pressure_millibar < 0 ? '-' : '+';
-        }
+        const unsigned long abs_mbar = labs(slot->pressure_millibar);
+        const unsigned long c = abs_mbar / 1000;
+        const unsigned long d = abs_mbar % 1000;
+        set_first_value_in_string(line + 25, c);
+        set_first_value_in_string(line + 30, d);
+        line[24] = slot->pressure_millibar < 0 ? '-' : '+';
 
-        const unsigned long conductivity_thousandths = slot->conductivity_thousandths;
-        {
-            const unsigned long a = conductivity_thousandths / 1000;
-            const unsigned long b = conductivity_thousandths % 1000;
-            set_first_value_in_string(line + 34, a);
-            set_first_value_in_string(line + 40, b);
-        }
+        const unsigned long e = slot->conductivity_thousandths / 1000;
+        const unsigned long f = slot->conductivity_thousandths % 1000;
+        set_first_value_in_string(line + 34, e);
+        set_first_value_in_string(line + 40, f);
 
         /* this will usually return immediately, occasionally it will internally yield() */
         if (-1 == fputs_to_open_file(fp, line)) return -1;
