@@ -64,7 +64,7 @@ int ecezo_request_read(void) {
     return 0;
 }
 
-int ecezo_finish_read(long * conductivity_thousandths_p) {
+int ecezo_finish_read(unsigned long * conductivity_thousandths_p) {
     /* initialize the i2c bus and acquire a lock */
     i2c_request();
 

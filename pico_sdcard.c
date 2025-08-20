@@ -133,7 +133,7 @@ static struct record {
     unsigned long long unix_microseconds;
     long temp_thousandths;
     long pressure_millibar;
-    long conductivity_thousandths;
+    unsigned long conductivity_thousandths;
 } records[2];
 static size_t irec_written = 0;
 
@@ -259,7 +259,7 @@ int record(void) {
     dprintf(2, "%s: opened \"%s\"\r\n", __func__, path);
 
     /* wild guess of line format: time, temperature, ... */
-    char line[] = "0123456789.000,+000.000,+0000.000,+00000.000\n";
+    char line[] = "0123456789.000,+000.000,+0000.000,00000.000\n";
 
     /* subscribe to the data feed */
     size_t irec_read = *(volatile size_t *)&irec_written;
@@ -304,14 +304,12 @@ int record(void) {
             line[24] = pressure_millibar < 0 ? '-' : '+';
         }
 
-        const long conductivity_thousandths = slot->conductivity_thousandths;
+        const unsigned long conductivity_thousandths = slot->conductivity_thousandths;
         {
-            const unsigned long abs_cond = labs(conductivity_thousandths);
-            const unsigned long a = abs_cond / 1000;
-            const unsigned long b = abs_cond % 1000;
-            set_first_value_in_string(line + 35, a);
-            set_first_value_in_string(line + 41, b);
-            line[34] = conductivity_thousandths < 0 ? '-' : '+';
+            const unsigned long a = conductivity_thousandths / 1000;
+            const unsigned long b = conductivity_thousandths % 1000;
+            set_first_value_in_string(line + 34, a);
+            set_first_value_in_string(line + 40, b);
         }
 
         /* this will usually return immediately, occasionally it will internally yield() */
