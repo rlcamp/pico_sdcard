@@ -121,6 +121,7 @@ void lower_power_sleep_ms(const unsigned delay_ms) {
     irq_clear(hardware_alarm_get_irq_num(alarm_num));
 
     /* cleanup */
+    hw_clear_bits(&timer_hw->inte, 1U << alarm_num);
     timer_hardware_alarm_unclaim(timer_hw, alarm_num);
 }
 
@@ -179,7 +180,7 @@ int record(void) {
     /* wild guess of line format: time, temperature, ... */
     char line[] = "0123456789.000,+000.000,+0000.000,+00000.000\n";
 
-    for (size_t iline = 0; !stop_requested; iline++) {
+    for (size_t iline = 0;; iline++) {
         /* run other tasks or low power sleep until next alarm interrupt */
         while (!(timer_hw->intr & (1U << alarm_num)))
             yield();
@@ -189,6 +190,9 @@ int record(void) {
         /* acknowledge and clear the interrupt in both timer and nvic */
         hw_clear_bits(&timer_hw->intr, 1U << alarm_num);
         irq_clear(hardware_alarm_get_irq_num(alarm_num));
+
+        /* before rearming timer, check whether we should stop */
+        if (stop_requested) break;
 
         /* increment and rearm the alarm */
         timer_hw->alarm[alarm_num] += period_microseconds;
@@ -243,6 +247,10 @@ int record(void) {
         ecezo_request_read();
     }
     dprintf(2, "\r\n");
+
+    /* deinit timer */
+    hw_clear_bits(&timer_hw->inte, 1U << alarm_num);
+    timer_hardware_alarm_unclaim(timer_hw, alarm_num);
 
     if ((fres = f_close(fp))) {
         dprintf(2, "%s: f_close(\"%s\"): %d\r\n", __func__, path, fres);
