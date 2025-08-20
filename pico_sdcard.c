@@ -128,6 +128,100 @@ void lower_power_sleep_ms(const unsigned delay_ms) {
 __attribute((aligned(4))) static FATFS * fs = &(static FATFS) { };
 __attribute((aligned(4))) static FIL * fp = &(static FIL) { };
 
+/* length-two ring buffer populated by one task and consumed by zero or more others */
+static struct record {
+    unsigned long long unix_microseconds;
+    long temp_thousandths;
+    long pressure_millibar;
+    long conductivity_thousandths;
+} records[2];
+static size_t irec_written = 0;
+
+/* this gets incremented by anything that wants the sample data to be flowing. currently,
+ tasks can only be started by the main thread, which will notice if this counter is nonzero
+ and the sample task is not yet running, and start it. the task itself will notice if the
+ counter has fallen to zero and shut down cleanly */
+volatile unsigned char sample_consumers = 0;
+
+static void sample_request(void) {
+    /* if data was not already flowing... */
+    if (!(sample_consumers++)) {
+        /* allow the main thread to react to this becoming nonzero */
+
+        /* TODO: rework internals of cortex_m_cooperative_multitasking to allow tasks
+         other than the main thread to start other tasks? */
+        __SEV();
+        yield();
+    }
+}
+
+static void sample_release(void) {
+    if (!(--sample_consumers)) {
+        /* allow the sample thread to react to this count dropping to zero */
+        __SEV();
+        yield();
+    }
+}
+
+static void sample(void) {
+    /* get a timer, enable interrupt for alarm, but leave it disabled in nvic */
+    const unsigned alarm_num = timer_hardware_alarm_claim_unused(timer_hw, true);
+    hw_set_bits(&timer_hw->inte, 1U << alarm_num);
+    irq_set_enabled(hardware_alarm_get_irq_num(alarm_num), false);
+
+    const unsigned period_microseconds = 1000000;
+
+    /* first tick will be one interval from now */
+    timer_hw->alarm[alarm_num] = timer_hw->timerawl + period_microseconds;
+
+    /* need to request the first read >= 600 ms before we need it */
+    ecezo_request_read();
+
+    while (1) {
+        /* run other tasks or low power sleep until next alarm interrupt */
+        while (!(timer_hw->intr & (1U << alarm_num)))
+            yield();
+
+        const unsigned long long uptime_now = timer_time_us_64(timer_hw);
+
+        /* acknowledge and clear the interrupt in both timer and nvic */
+        hw_clear_bits(&timer_hw->intr, 1U << alarm_num);
+        irq_clear(hardware_alarm_get_irq_num(alarm_num));
+
+        /* before rearming timer, check whether we should stop */
+        if (!sample_consumers) break;
+
+        /* increment and rearm the alarm */
+        timer_hw->alarm[alarm_num] += period_microseconds;
+
+        struct record * slot = records + irec_written % 2;
+        memset(slot, 0, sizeof(struct record));
+
+        slot->unix_microseconds = uptime_now - uptime_microseconds_at_ref + unix_microseconds_at_ref;
+
+        /* read all the sensors. these block and internally call yield() a bunch, during
+         which the other task can make progress on the previous card write if necessary */
+        tsys01_read(&slot->temp_thousandths);
+        kellerld_read(&slot->pressure_millibar, NULL);
+        ecezo_finish_read(&slot->conductivity_thousandths);
+
+        /* need to request that the next ecezo read be started because it takes 600 ms */
+        ecezo_request_read();
+
+        irec_written++;
+        /* enforce that other threads see all of the above happen */
+        __DSB();
+
+        /* allow other threads to react */
+        __SEV();
+        yield();
+    }
+
+    /* deinit timer */
+    hw_clear_bits(&timer_hw->inte, 1U << alarm_num);
+    timer_hardware_alarm_unclaim(timer_hw, alarm_num);
+}
+
 volatile char stop_requested = 0;
 
 int record(void) {
@@ -164,42 +258,24 @@ int record(void) {
 
     dprintf(2, "%s: opened \"%s\"\r\n", __func__, path);
 
-    /* get a timer, enable interrupt for alarm, but leave it disabled in nvic */
-    const unsigned alarm_num = timer_hardware_alarm_claim_unused(timer_hw, true);
-    hw_set_bits(&timer_hw->inte, 1U << alarm_num);
-    irq_set_enabled(hardware_alarm_get_irq_num(alarm_num), false);
-
-    const unsigned period_microseconds = 1000000;
-
-    /* first tick will be one interval from now */
-    timer_hw->alarm[alarm_num] = timer_hw->timerawl + period_microseconds;
-
-    /* need to request the first read >= 600 ms before we need it */
-    ecezo_request_read();
-
     /* wild guess of line format: time, temperature, ... */
     char line[] = "0123456789.000,+000.000,+0000.000,+00000.000\n";
 
-    for (size_t iline = 0;; iline++) {
+    /* subscribe to the data feed */
+    size_t irec_read = *(volatile size_t *)&irec_written;
+
+    while (1) {
         /* run other tasks or low power sleep until next alarm interrupt */
-        while (!(timer_hw->intr & (1U << alarm_num)))
+        while (irec_read == *(volatile size_t *)&irec_written)
             yield();
-
-        const unsigned long long uptime_now = timer_time_us_64(timer_hw);
-
-        /* acknowledge and clear the interrupt in both timer and nvic */
-        hw_clear_bits(&timer_hw->intr, 1U << alarm_num);
-        irq_clear(hardware_alarm_get_irq_num(alarm_num));
 
         /* before rearming timer, check whether we should stop */
         if (stop_requested) break;
 
-        /* increment and rearm the alarm */
-        timer_hw->alarm[alarm_num] += period_microseconds;
+        const struct record * slot = records + irec_read % 2;
+        irec_read++;
 
-        /* set timestamp within output line */
-        /* TODO: add actual time offset via ds3231 */
-        const unsigned long long now = uptime_now - uptime_microseconds_at_ref + unix_microseconds_at_ref;
+        const unsigned long long now = slot->unix_microseconds;
         const unsigned long long now_ms = (now + 500ULL) / 1000ULL;
         const unsigned long long now_seconds_portion = now_ms / 1000ULL;
         const unsigned long long now_milliseconds_portion = now_ms % 1000ULL;
@@ -207,8 +283,8 @@ int record(void) {
         set_first_value_in_string(line + 0, now_seconds_portion);
         set_first_value_in_string(line + 11, now_milliseconds_portion);
 
-        long temp_thousandths;
-        if (tsys01_read(&temp_thousandths) != -1) {
+        const long temp_thousandths = slot->temp_thousandths;
+        {
             const unsigned long abs_thousandths = labs(temp_thousandths);
             const unsigned long a = abs_thousandths / 1000;
             const unsigned long b = abs_thousandths % 1000;
@@ -218,8 +294,8 @@ int record(void) {
             line[15] = temp_thousandths < 0 ? '-' : '+';
         }
 
-        long pressure_millibar;
-        if (kellerld_read(&pressure_millibar, NULL) != -1) {
+        const long pressure_millibar = slot->pressure_millibar;
+        {
             const unsigned long abs_mbar = labs(pressure_millibar);
             const unsigned long c = abs_mbar / 1000;
             const unsigned long d = abs_mbar % 1000;
@@ -228,8 +304,8 @@ int record(void) {
             line[24] = pressure_millibar < 0 ? '-' : '+';
         }
 
-        long conductivity_thousandths;
-        if (ecezo_finish_read(&conductivity_thousandths) != -1) {
+        const long conductivity_thousandths = slot->conductivity_thousandths;
+        {
             const unsigned long abs_cond = labs(conductivity_thousandths);
             const unsigned long a = abs_cond / 1000;
             const unsigned long b = abs_cond % 1000;
@@ -247,10 +323,6 @@ int record(void) {
         ecezo_request_read();
     }
     dprintf(2, "\r\n");
-
-    /* deinit timer */
-    hw_clear_bits(&timer_hw->inte, 1U << alarm_num);
-    timer_hardware_alarm_unclaim(timer_hw, alarm_num);
 
     if ((fres = f_close(fp))) {
         dprintf(2, "%s: f_close(\"%s\"): %d\r\n", __func__, path, fres);
@@ -273,7 +345,13 @@ void record_outer(void) {
 
     lower_power_sleep_ms(10);
 
+    /* request that data start flowing if it is not already */
+    sample_request();
+
     record();
+
+    /* notify sample task that it can stop */
+    sample_release();
 
     /* make sure we will reinit when we get here next */
     diskio_initted = 0;
@@ -378,9 +456,10 @@ int main(void) {
         unsigned char stack[4096 - 16];
 
         struct child_context child;
-    } child_record;
+    } child_sample, child_record;
 
     /* purely for diagnostic purposes */
+    memset(child_sample.stack, 0xFF, sizeof(child_sample.stack));
     memset(child_record.stack, 0xFF, sizeof(child_record.stack));
 
     child_start(&child_record.child, record_outer);
@@ -403,7 +482,7 @@ int main(void) {
             else if (!strcmp(line, "stop"))
                 stop_requested = 1;
 
-            else if (line == strstr(line, "ecezo ") && !child_is_running(&child_record.child))
+            else if (line == strstr(line, "ecezo ") && !child_is_running(&child_sample.child))
                 ecezo_command(line + 6);
 
             else if (!strcmp(line, "flash")) {
@@ -424,12 +503,20 @@ int main(void) {
 
             else if (!strcmp(line, "mem")) {
                 extern unsigned char end[]; /* provided by linker script, used by sbrk */
+                dprintf(2, "%s: sample child stack high water: %d bytes\r\n", PROGNAME,
+                        estimate_child_stack_usage(sizeof(child_sample.stack), child_sample.stack));
                 dprintf(2, "%s: record child stack high water: %d bytes\r\n", PROGNAME,
                         estimate_child_stack_usage(sizeof(child_record.stack), child_record.stack));
                 dprintf(2, "%s: heap usage high water: %d bytes\r\n", PROGNAME, (uintptr_t)sbrk(0) - (uintptr_t)end);
                 dprintf(2, "%s: free ram at least %d bytes\r\n", PROGNAME, estimate_free_ram_from_main_thread());
             }
         }
+
+        /* if there is a nonzero number of consumers requesting that sample data be flowing
+         and sample data is not yet flowing, start it TODO: factor this out */
+        if (sample_consumers && !child_is_running(&child_sample.child))
+            child_start(&child_sample.child, sample);
+
         yield();
     }
 }
