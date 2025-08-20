@@ -408,6 +408,37 @@ void record_outer(void) {
     card_release();
 }
 
+static int ls(void) {
+    if (-1 == card_request()) return -1;
+
+    FRESULT fres;
+    static DIR dir;
+    if ((fres = f_opendir(&dir, "")) != FR_OK) {
+        card_release();
+        dprintf(2, "error: %s: f_opendir(): %d\r\n", __func__, fres);
+        return -1;
+    }
+
+    static FILINFO info;
+    while (FR_OK == f_readdir(&dir, &info) && info.fname[0] != '\0') {
+        if ('.' == info.fname[0]) continue;
+
+        card_unlock();
+        dprintf(2, "%s\r\n", info.fname);
+        card_lock();
+
+        /* give other tasks a chance to do something */
+        __SEV();
+        yield();
+    }
+
+    f_closedir(&dir);
+
+    card_release();
+
+    return 0;
+}
+
 static int bme280_read_and_print(void) {
     long temp_hundredths;
     unsigned long pressure_256ths, humidity_1024ths;
@@ -529,6 +560,9 @@ int main(void) {
 
             else if (!strcmp(line, "stop"))
                 stop_requested = 1;
+
+            else if (!strcmp(line, "ls"))
+                ls();
 
             else if (line == strstr(line, "ecezo ") && !child_is_running(&child_sample.child))
                 ecezo_command(line + 6);
