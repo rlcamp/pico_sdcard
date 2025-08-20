@@ -308,6 +308,9 @@ int record(void) {
         }
     }
 
+    /* let other tasks potentially do things with the card while we wait for data */
+    card_unlock();
+
     dprintf(2, "%s: opened \"%s\"\r\n", __func__, path);
 
     /* wild guess of line format: time, temperature, ... */
@@ -317,8 +320,6 @@ int record(void) {
     size_t irec_read = *(volatile size_t *)&irec_written;
 
     while (1) {
-        /* let other tasks potentially do things with the card while we wait for data */
-        card_unlock();
         size_t irec_written_now;
 
         /* run other tasks or low power sleep until writer advances ring buffer */
@@ -331,9 +332,6 @@ int record(void) {
             dprintf(2, "warning: %s: missed %u records\r\n", __func__, (unsigned)skipped);
             irec_read += skipped;
         }
-
-        /* before we either write to the card or leave this loop, reacquire the lock */
-        card_lock();
 
         /* if main thread requested that we stop, break out of logging loop and clean up */
         if (stop_requested) break;
@@ -375,11 +373,18 @@ int record(void) {
          during the above reads. if we did have to worry about that, we would have one last
          opportunity here to skip logging of this garbled line */
 
+        /* reacquire the lock */
+        card_lock();
+
         /* this will usually return immediately, occasionally it will internally yield() */
         if (-1 == fputs_to_open_file(fp, line)) return -1;
 
+        card_unlock();
+
         dprintf(2, "%s", line);
     }
+
+    card_lock();
 
     if ((fres = f_close(fp))) {
         dprintf(2, "%s: f_close(\"%s\"): %d\r\n", __func__, path, fres);
