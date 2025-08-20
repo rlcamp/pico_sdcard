@@ -379,9 +379,6 @@ int record(void) {
         if (-1 == fputs_to_open_file(fp, line)) return -1;
 
         dprintf(2, "%s", line);
-
-        /* need to request that the next ecezo read be started because it takes 600 ms */
-        ecezo_request_read();
     }
 
     if ((fres = f_close(fp))) {
