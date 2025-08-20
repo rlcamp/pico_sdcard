@@ -1,8 +1,7 @@
+/* proof of concept data logger to test sd card code */
 #ifndef PROGNAME
 #define PROGNAME "pico_sdcard"
 #endif
-
-/* proof of concept data logger to test sd card code */
 
 /* lower level pico-sdk includes */
 #include "hardware/xosc.h"
@@ -282,7 +281,7 @@ int record(void) {
             irec_read += skipped;
         }
 
-        /* before rearming timer, check whether we should stop */
+        /* if main thread requested that we stop, break out of logging loop and clean up */
         if (stop_requested) break;
 
         const struct record * slot = records + irec_read % SAMPLE_RING_BUFFER_COUNT;
@@ -330,7 +329,6 @@ int record(void) {
         /* need to request that the next ecezo read be started because it takes 600 ms */
         ecezo_request_read();
     }
-    dprintf(2, "\r\n");
 
     if ((fres = f_close(fp))) {
         dprintf(2, "%s: f_close(\"%s\"): %d\r\n", __func__, path, fres);
@@ -342,7 +340,6 @@ int record(void) {
         return -1;
     }
 
-    dprintf(2, "%s: done\r\n", __func__);
     return 0;
 }
 
