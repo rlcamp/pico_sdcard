@@ -124,9 +124,6 @@ void lower_power_sleep_ms(const unsigned delay_ms) {
     timer_hardware_alarm_unclaim(timer_hw, alarm_num);
 }
 
-__attribute((aligned(4))) static FATFS * fs = &(static FATFS) { };
-__attribute((aligned(4))) static FIL * fp = &(static FIL) { };
-
 /* length-two ring buffer populated by one task and consumed by zero or more others */
 #define SAMPLE_RING_BUFFER_COUNT 4
 _Static_assert(!(SAMPLE_RING_BUFFER_COUNT & (SAMPLE_RING_BUFFER_COUNT - 1)), "ring buffer must be a power of two");
@@ -225,6 +222,8 @@ static void sample(void) {
     timer_hardware_alarm_unclaim(timer_hw, alarm_num);
 }
 
+__attribute((aligned(4))) static FATFS * fs = &(static FATFS) { };
+
 static volatile unsigned char card_locked = 0, card_users = 0;
 
 static void card_lock(void) {
@@ -287,6 +286,8 @@ volatile char stop_requested = 0;
 int record(void) {
     stop_requested = 0;
 
+    /* this is big, so don't put it on call stack */
+    __attribute((aligned(4))) static FIL * fp = &(static FIL) { };
     FRESULT fres;
 
     /* loop until we get to the first available filename */
