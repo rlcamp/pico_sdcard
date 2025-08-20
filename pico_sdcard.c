@@ -225,21 +225,69 @@ static void sample(void) {
     timer_hardware_alarm_unclaim(timer_hw, alarm_num);
 }
 
+static volatile unsigned char card_locked = 0, card_users = 0;
+
+static void card_lock(void) {
+    while (card_locked) yield();
+    card_locked = 1;
+}
+
+static void card_unlock(void) {
+    card_locked = 0;
+    __SEV();
+}
+
+static int card_request(void) {
+    card_lock();
+
+    if (!(card_users++)) {
+        /* enable power to card */
+        gpio_init(22);
+        gpio_set_dir(22, GPIO_OUT);
+        gpio_put(22, 1);
+
+        lower_power_sleep_ms(10);
+
+        /* we have a guarantee that when the above returns, it has been at least 1 ms since
+         power was applied to the sd card */
+
+        dprintf(2, "%s: mounting\r\n", __func__);
+
+        FRESULT fres;
+        if ((fres = f_mount(fs, "", 1))) {
+            card_unlock();
+            if (FR_NOT_READY == fres)
+                dprintf(2, "error: %s: card apparently not present\r\n", __func__);
+            else
+                dprintf(2, "error: %s: f_mount(): %d\r\n", __func__, fres);
+            return -1;
+        }
+    }
+
+    /* caller holds the lock when this returns successfully */
+    return 0;
+}
+
+static void card_release(void) {
+    /* caller is expected to still hold the lock */
+    if (!(--card_users)) {
+        /* fatfs doesn't give us any API to have it tell the lower level diskio code that
+         the card has been power cycled and will have to be initted when mounting again */
+        diskio_initted = 0;
+
+        gpio_put(22, 0);
+        gpio_deinit(22);
+    }
+
+    card_unlock();
+}
+
 volatile char stop_requested = 0;
 
 int record(void) {
     stop_requested = 0;
 
     FRESULT fres;
-    if ((fres = f_mount(fs, "", 1))) {
-        if (FR_NOT_READY == fres)
-            dprintf(2, "error: %s: card apparently not present\r\n", __func__);
-        else
-            dprintf(2, "error: %s: f_mount(): %d\r\n", __func__, fres);
-        return -1;
-    }
-
-    dprintf(2, "%s: mounted\r\n", __func__);
 
     /* loop until we get to the first available filename */
     unsigned file_id = 0;
@@ -268,6 +316,8 @@ int record(void) {
     size_t irec_read = *(volatile size_t *)&irec_written;
 
     while (1) {
+        /* let other tasks potentially do things with the card while we wait for data */
+        card_unlock();
         size_t irec_written_now;
 
         /* run other tasks or low power sleep until writer advances ring buffer */
@@ -280,6 +330,9 @@ int record(void) {
             dprintf(2, "warning: %s: missed %u records\r\n", __func__, (unsigned)skipped);
             irec_read += skipped;
         }
+
+        /* before we either write to the card or leave this loop, reacquire the lock */
+        card_lock();
 
         /* if main thread requested that we stop, break out of logging loop and clean up */
         if (stop_requested) break;
@@ -344,11 +397,7 @@ int record(void) {
 }
 
 void record_outer(void) {
-    gpio_init(22);
-    gpio_set_dir(22, GPIO_OUT);
-    gpio_put(22, 1);
-
-    lower_power_sleep_ms(10);
+    if (-1 == card_request()) return;
 
     /* request that data start flowing if it is not already */
     sample_request();
@@ -358,11 +407,7 @@ void record_outer(void) {
     /* notify sample task that it can stop */
     sample_release();
 
-    /* make sure we will reinit when we get here next */
-    diskio_initted = 0;
-
-    gpio_put(22, 0);
-    gpio_deinit(22);
+    card_release();
 }
 
 static int bme280_read_and_print(void) {
