@@ -269,9 +269,18 @@ int record(void) {
     size_t irec_read = *(volatile size_t *)&irec_written;
 
     while (1) {
-        /* run other tasks or low power sleep until next alarm interrupt */
-        while (irec_read == *(volatile size_t *)&irec_written)
+        size_t irec_written_now;
+
+        /* run other tasks or low power sleep until writer advances ring buffer */
+        while (irec_read == (irec_written_now = *(volatile size_t *)&irec_written))
             yield();
+
+        /* if we fell behind the writer, fast forward and emit a warning */
+        if (irec_written_now - irec_read > SAMPLE_RING_BUFFER_COUNT - 1) {
+            const size_t skipped = (irec_written_now - irec_read) - (SAMPLE_RING_BUFFER_COUNT - 1);
+            dprintf(2, "warning: %s: missed %u records\r\n", __func__, (unsigned)skipped);
+            irec_read += skipped;
+        }
 
         /* before rearming timer, check whether we should stop */
         if (stop_requested) break;
@@ -306,6 +315,12 @@ int record(void) {
         const unsigned long f = slot->conductivity_thousandths % 1000;
         set_first_value_in_string(line + 34, e);
         set_first_value_in_string(line + 40, f);
+
+        /* since we're doing cooperative multitasking, and the writer is another task
+         rather than an interrupt or DMA, AND none of the above string manipulation calls
+         yield(), we do NOT have to re-check here whether the writer lapped the reader
+         during the above reads. if we did have to worry about that, we would have one last
+         opportunity here to skip logging of this garbled line */
 
         /* this will usually return immediately, occasionally it will internally yield() */
         if (-1 == fputs_to_open_file(fp, line)) return -1;
