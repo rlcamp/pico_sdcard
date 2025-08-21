@@ -197,7 +197,7 @@ static void sample(void) {
         struct record * slot = records + irec_written % SAMPLE_RING_BUFFER_COUNT;
         memset(slot, 0, sizeof(struct record));
 
-        slot->unix_microseconds = uptime_now - uptime_microseconds_at_ref + unix_microseconds_at_ref;
+        slot->unix_microseconds = uptime_now + unix_microseconds_at_t0;
 
         /* read all the sensors. these block and internally call yield() a bunch, during
          which the other task can make progress on the previous card write if necessary */

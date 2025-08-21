@@ -12,8 +12,7 @@
 
 extern void yield(void);
 
-unsigned long long unix_microseconds_at_ref;
-unsigned long long uptime_microseconds_at_ref;
+unsigned long long unix_microseconds_at_t0;
 
 static unsigned char byte_hex(unsigned char x) {
     return x >= '0' && x <= '9' ? x - '0' : (x >= 'A' && x <= 'Z' ? x - 'A' : x - 'a') + 10;
@@ -129,24 +128,23 @@ int ds3231_to_sys(void) {
     dprintf(2, "%s: %04u%02u%02uT%02u%02u%02uZ\r\n", __func__,
             year + 2000, mon, mday, hour, min, sec);
 
-    unix_microseconds_at_ref = __tm_to_secs(&(struct tm) {
+    unix_microseconds_at_t0 = __tm_to_secs(&(struct tm) {
         .tm_year = year + 2000 - 1900,
         .tm_mon = mon - 1, /* subtract one for struct tm months, which count from zero */
         .tm_mday = mday,
         .tm_hour = hour,
         .tm_min = min,
         .tm_sec = sec
-    }) * 1000000ULL;
-    uptime_microseconds_at_ref = uptime_microseconds;
+    }) * 1000000ULL - uptime_microseconds;
 
     return 0;
 }
 
 unsigned long long wait_until_one_second_boundary(void) {
     const unsigned long long uptime_now = timer_time_us_64(timer_hw);
-    const unsigned long long unix_microseconds_now = uptime_now - uptime_microseconds_at_ref + unix_microseconds_at_ref;
+    const unsigned long long unix_microseconds_now = uptime_now + unix_microseconds_at_t0;
     const unsigned long long unix_microseconds_at_future_one_second_boundary = ((unix_microseconds_now + 1100000ULL) / 1000000ULL) * 1000000ULL;
-    const unsigned long long uptime_at_future_one_second_boundary = unix_microseconds_at_future_one_second_boundary - unix_microseconds_at_ref + uptime_microseconds_at_ref;
+    const unsigned long long uptime_at_future_one_second_boundary = unix_microseconds_at_future_one_second_boundary - unix_microseconds_at_t0;
 
     /* get a timer, enable interrupt for alarm, but leave it disabled in nvic */
     const unsigned alarm_num = timer_hardware_alarm_claim_unused(timer_hw, true);
@@ -296,13 +294,10 @@ int gpzda_to_sys(const char * line, const unsigned baud_rate, const unsigned lon
     /* assumed duration of the nmea string as transmitted */
     const unsigned long long correction = (line_length * 10U * 1000000ULL + baud_rate / 2U) / baud_rate;
 
-    const unsigned long long unix_at_up_prior = unix_microseconds_at_ref - uptime_microseconds_at_ref;
+    const unsigned long long unix_at_up_prior = unix_microseconds_at_t0;
+    unix_microseconds_at_t0 = unix_microseconds_encoded - uptime_microseconds_at_end_of_line + correction;
 
-    uptime_microseconds_at_ref = uptime_microseconds_at_end_of_line;
-    unix_microseconds_at_ref = unix_microseconds_encoded + correction;
-
-    const unsigned long long unix_at_up = unix_microseconds_at_ref - uptime_microseconds_at_ref;
-    const long change = unix_at_up_prior < unix_at_up ? (long)(unix_at_up - unix_at_up_prior) : -(long)(unix_at_up_prior - unix_at_up);
+    const long change = unix_at_up_prior < unix_microseconds_at_t0 ? (long)(unix_microseconds_at_t0 - unix_at_up_prior) : -(long)(unix_at_up_prior - unix_microseconds_at_t0);
     dprintf(2, "%s: adjusted time by %ld microseconds\r\n", __func__, change);
 
     if (-1 == sys_to_ds3231())
@@ -312,7 +307,7 @@ int gpzda_to_sys(const char * line, const unsigned baud_rate, const unsigned lon
 }
 
 uint32_t get_fattime(void) {
-    const unsigned long long unix_microseconds = timer_time_us_64(timer_hw) - uptime_microseconds_at_ref + unix_microseconds_at_ref;
+    const unsigned long long unix_microseconds = timer_time_us_64(timer_hw) + unix_microseconds_at_t0;
 
     struct tm out;
     if (!gmtime_r(&(time_t) { unix_microseconds / 1000000ULL }, &out)) return 0;
