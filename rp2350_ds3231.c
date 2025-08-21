@@ -12,7 +12,7 @@
 
 extern void yield(void);
 
-unsigned long long unix_microseconds_at_t0;
+unsigned long long unix_microseconds_at_t0 = (unsigned long long)-1;
 
 static unsigned char byte_hex(unsigned char x) {
     return x >= '0' && x <= '9' ? x - '0' : (x >= 'A' && x <= 'Z' ? x - 'A' : x - 'a') + 10;
@@ -128,6 +128,7 @@ int ds3231_to_sys(void) {
     dprintf(2, "%s: %04u%02u%02uT%02u%02u%02uZ\r\n", __func__,
             year + 2000, mon, mday, hour, min, sec);
 
+    const unsigned long long unix_at_t0_prior = unix_microseconds_at_t0;
     unix_microseconds_at_t0 = __tm_to_secs(&(struct tm) {
         .tm_year = year + 2000 - 1900,
         .tm_mon = mon - 1, /* subtract one for struct tm months, which count from zero */
@@ -136,6 +137,11 @@ int ds3231_to_sys(void) {
         .tm_min = min,
         .tm_sec = sec
     }) * 1000000ULL - uptime_microseconds;
+
+    if (unix_at_t0_prior != (unsigned long long)-1) {
+        const long change = unix_at_t0_prior < unix_microseconds_at_t0 ? (long)(unix_microseconds_at_t0 - unix_at_t0_prior) : -(long)(unix_at_t0_prior - unix_microseconds_at_t0);
+        dprintf(2, "%s: adjusted time by %ld microseconds\r\n", __func__, change);
+    }
 
     return 0;
 }
