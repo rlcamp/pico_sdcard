@@ -117,7 +117,7 @@ int ds3231_to_sys(void) {
         sec = 10 * ((buf[0] >> 4) & 0x7) + ((buf[0] >> 0) & 0xF);
         __sev();
         yield();
-    } while (sec != sec_prior);
+    } while (sec_prior == (unsigned)-1 || sec == sec_prior);
     i2c_release();
 
     const unsigned min = 10 * ((buf[1] >> 4) & 0x7) + ((buf[1] >> 0) & 0xF);
