@@ -181,7 +181,7 @@ int sys_to_ds3231(void) {
     /* when we return from the above, we have the i2c lock, and we know what time it is */
 
     struct tm tm;
-    if (!gmtime_r(&(time_t) { unix_microseconds_now / 1000000ULL }, &tm)) return 0;
+    if (!gmtime_r(&(time_t) { (unix_microseconds_now + 500000ULL) / 1000000ULL }, &tm)) return 0;
     const unsigned mon = tm.tm_mon + 1, year = tm.tm_year + 1900;
 
     /* the ideal time to start this transaction would be such that the seconds register
