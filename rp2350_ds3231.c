@@ -288,7 +288,6 @@ int gpzda_to_sys(const char * line, const unsigned baud_rate, const unsigned lon
         .tm_sec = sec
     });
 
-    /* encoded time in 32768 Hz ticks */
     const unsigned long long unix_microseconds_encoded = out * 1000000ULL + (frac_num * 1000000ULL + frac_den / 2U) / frac_den;
 
     /* length in bytes of the nmea string encoding this time, including \r\n */
