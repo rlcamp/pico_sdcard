@@ -153,46 +153,50 @@ int ds3231_to_sys(void) {
     return 0;
 }
 
-unsigned long long wait_until_one_second_boundary(void) {
-    const unsigned long long uptime_now = timer_time_us_64(timer_hw);
-    const unsigned long long unix_microseconds_now = uptime_now + unix_microseconds_at_t0;
-    const unsigned long long unix_microseconds_at_future_one_second_boundary = ((unix_microseconds_now + 1100000ULL) / 1000000ULL) * 1000000ULL;
-    const unsigned long long uptime_at_future_one_second_boundary = unix_microseconds_at_future_one_second_boundary - unix_microseconds_at_t0;
+int sys_to_ds3231(void) {
+    i2c_request();
+    i2c_unlock();
 
     /* get a timer, enable interrupt for alarm, but leave it disabled in nvic */
     const unsigned alarm_num = timer_hardware_alarm_claim_unused(timer_hw, true);
     hw_set_bits(&timer_hw->inte, 1U << alarm_num);
     irq_set_enabled(hardware_alarm_get_irq_num(alarm_num), false);
 
-    /* arm timer */
-    timer_hw->alarm[alarm_num] = (uptime_at_future_one_second_boundary % 0xFFFFFFFF);
+    unsigned long long unix_microseconds_target;
+    struct tm tm;
 
-    /* run other tasks or low power sleep until alarm interrupt */
-    while (!(timer_hw->intr & (1U << alarm_num)))
-        yield();
+    do {
+        const unsigned long long unix_microseconds_now = timer_time_us_64(timer_hw) + unix_microseconds_at_t0;
 
-    /* acknowledge and clear the interrupt in both timer and nvic */
-    hw_clear_bits(&timer_hw->intr, 1U << alarm_num);
-    irq_clear(hardware_alarm_get_irq_num(alarm_num));
+        /* a time at least 100 ms in the future TODO: subtract offset of seconds field within transaction */
+        unix_microseconds_target = ((unix_microseconds_now + 1100000ULL) / 1000000ULL) * 1000000ULL;
+
+        /* populate the nearest integer struct tm while we wait for it to be then */
+        if (!gmtime_r(&(time_t) { (unix_microseconds_target + 500000ULL) / 1000000ULL }, &tm)) {
+            i2c_lock();
+            i2c_release();
+            return -1;
+        }
+
+        const unsigned long long uptime_target = unix_microseconds_target - unix_microseconds_at_t0;
+
+        /* arm timer */
+        timer_hw->alarm[alarm_num] = (uptime_target % 0xFFFFFFFF);
+
+        /* run other tasks or low power sleep until alarm interrupt */
+        while (!(timer_hw->intr & (1U << alarm_num)))
+            yield();
+
+        /* acknowledge and clear the interrupt in both timer and nvic */
+        hw_clear_bits(&timer_hw->intr, 1U << alarm_num);
+        irq_clear(hardware_alarm_get_irq_num(alarm_num));
+    } while (-1 == i2c_lock_or_fail());
+
+    /* when we return from the above, we have the i2c lock, and we know what time it is */
 
     /* cleanup */
     timer_hardware_alarm_unclaim(timer_hw, alarm_num);
 
-    return unix_microseconds_at_future_one_second_boundary;
-}
-
-int sys_to_ds3231(void) {
-    i2c_request();
-    i2c_unlock();
-
-    unsigned long long unix_microseconds_now;
-    do unix_microseconds_now = wait_until_one_second_boundary();
-    while (-1 == i2c_lock_or_fail());
-
-    /* when we return from the above, we have the i2c lock, and we know what time it is */
-
-    struct tm tm;
-    if (!gmtime_r(&(time_t) { (unix_microseconds_now + 500000ULL) / 1000000ULL }, &tm)) return 0;
     const unsigned mon = tm.tm_mon + 1, year = tm.tm_year + 1900;
 
     /* the ideal time to start this transaction would be such that the seconds register
