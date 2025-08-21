@@ -569,9 +569,13 @@ int main(void) {
 
     if (-1 == tsys01_init())
         dprintf(2, "%s: could not initialize tsys01\r\n", PROGNAME);
+    else
+        dprintf(2, "%s: successfully initted tsys01\r\n", PROGNAME);
 
     if (-1 == kellerld_init())
         dprintf(2, "%s: could not initialize kellerld\r\n", PROGNAME);
+    else
+        dprintf(2, "%s: successfully initted kellerld\r\n", PROGNAME);
 
     if (-1 == ecezo_init())
         dprintf(2, "%s: could not initialize ecezo\r\n", PROGNAME);
