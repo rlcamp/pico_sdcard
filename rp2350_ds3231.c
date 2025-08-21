@@ -108,7 +108,7 @@ int ds3231_to_sys(void) {
 
         uptime_microseconds = timer_time_us_64(timer_hw);
 
-        if (i2c_read_blocking(i2c0, 0x68, buf, 7, false) != 7) {
+        if (i2c_read_burst_blocking(i2c0, 0x68, buf, 1) != 1) {
             i2c_release();
             return -1;
         }
@@ -117,6 +117,13 @@ int ds3231_to_sys(void) {
         __sev();
         yield();
     } while (sec_prior == (unsigned)-1 || sec == sec_prior);
+
+    /* read the remaining six bytes */
+    if (i2c_read_blocking(i2c0, 0x68, buf + 1, 6, false) != 6) {
+        i2c_release();
+        return -1;
+    }
+
     i2c_release();
 
     const unsigned min = 10 * ((buf[1] >> 4) & 0x7) + ((buf[1] >> 0) & 0xF);
