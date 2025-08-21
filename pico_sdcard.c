@@ -145,22 +145,18 @@ volatile unsigned char sample_consumers = 0;
 
 static void sample_request(void) {
     /* if data was not already flowing... */
-    if (!(sample_consumers++)) {
-        /* allow the main thread to react to this becoming nonzero */
-
-        /* TODO: rework internals of cortex_m_cooperative_multitasking to allow tasks
-         other than the main thread to start other tasks? */
+    if (!(sample_consumers++))
+    /* allow the main thread to react to this becoming nonzero */
         __SEV();
-        yield();
-    }
+
+    /* TODO: rework internals of cortex_m_cooperative_multitasking to allow tasks
+     other than the main thread to start other tasks? */
 }
 
 static void sample_release(void) {
-    if (!(--sample_consumers)) {
-        /* allow the sample thread to react to this count dropping to zero */
+    if (!(--sample_consumers))
+    /* allow the sample thread to react to this count dropping to zero */
         __SEV();
-        yield();
-    }
 }
 
 static void sample(void) {
