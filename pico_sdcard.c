@@ -40,7 +40,7 @@
 /* need to be able to tell fatfs internals that it will have to reinit the card */
 extern unsigned char diskio_initted;
 
-unsigned char verbose = 1;
+volatile unsigned char verbose = 0;
 
 extern void * sbrk(ptrdiff_t);
 
@@ -638,6 +638,9 @@ int main(void) {
 
             else if (!strcmp(line, "uptime"))
                 dprintf(2, "%s: uptime %lu\r\n", PROGNAME, (unsigned long)(uptime_now / 1000000ULL));
+
+            else if (line == strstr(line, "verbose "))
+                verbose = strtoul(line + 8, NULL, 10);
 
             else if (!strcmp(line, "tasks"))
                 dprintf(2, PROGNAME ": child tasks running: sample: %u, record: %u\r\n",

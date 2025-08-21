@@ -14,7 +14,7 @@
 
 size_t fatfs_sectors_read = 0, fatfs_sectors_written = 0;
 
-__attribute((weak)) unsigned char verbose = 0;
+__attribute((weak)) volatile unsigned char verbose = 0;
 
 unsigned char diskio_initted = 0;
 

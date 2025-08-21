@@ -14,7 +14,7 @@
 
 #include <stdio.h>
 
-__attribute((weak)) unsigned char verbose = 0;
+__attribute((weak)) volatile unsigned char verbose = 0;
 
 __attribute((weak)) void yield(void) {
     __DSB(); __WFE();
