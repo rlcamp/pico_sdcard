@@ -178,8 +178,6 @@ int sys_to_ds3231(void) {
     do unix_microseconds_now = wait_until_one_second_boundary();
     while (-1 == i2c_lock_or_fail());
 
-    const unsigned long long unix_microseconds_again = timer_time_us_64(timer_hw) - uptime_microseconds_at_ref + unix_microseconds_at_ref;
-
     /* when we return from the above, we have the i2c lock, and we know what time it is */
 
     struct tm tm;
@@ -206,7 +204,6 @@ int sys_to_ds3231(void) {
 
     i2c_release();
 
-    dprintf(2, "%s: %lu\r\n", __func__, (unsigned long)(unix_microseconds_again - unix_microseconds_now));
     return 0;
 }
 
@@ -300,8 +297,14 @@ int gpzda_to_sys(const char * line, const unsigned baud_rate, const unsigned lon
     /* assumed duration of the nmea string as transmitted */
     const unsigned long long correction = (line_length * 10U * 1000000ULL + baud_rate / 2U) / baud_rate;
 
+    const unsigned long long unix_at_up_prior = unix_microseconds_at_ref - uptime_microseconds_at_ref;
+
     uptime_microseconds_at_ref = uptime_microseconds_at_end_of_line;
     unix_microseconds_at_ref = unix_microseconds_encoded + correction;
+
+    const unsigned long long unix_at_up = unix_microseconds_at_ref - uptime_microseconds_at_ref;
+    const long change = unix_at_up_prior < unix_at_up ? (long)(unix_at_up - unix_at_up_prior) : -(long)(unix_at_up_prior - unix_at_up);
+    dprintf(2, "%s: adjusted time by %ld microseconds\r\n", __func__, change);
 
     if (-1 == sys_to_ds3231())
         dprintf(2, "%s: failed to set ds3231 from sys\r\n", __func__);
