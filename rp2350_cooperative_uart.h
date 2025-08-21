@@ -8,3 +8,4 @@ const char * get_line_from_uart(void);
 
 void cooperative_uart_init(void);
 
+int write(int fd, void * bytes, int len);

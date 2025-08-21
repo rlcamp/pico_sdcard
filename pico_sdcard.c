@@ -439,6 +439,60 @@ static int ls(void) {
     return 0;
 }
 
+static int cat(const char * path) {
+    if (-1 == card_request()) return -1;
+
+    do {
+        /* this is big, so don't put it on call stack */
+        __attribute((aligned(4))) static FIL * fp = &(static FIL) { };
+        FRESULT fres;
+
+        if ((fres = f_open(fp, path, FA_OPEN_EXISTING | FA_READ))) {
+            if (FR_NO_FILE == fres)
+                dprintf(2, "%s: f_open(\"%s\"): no such file\r\n", __func__, path);
+            else
+                dprintf(2, "%s: f_open(\"%s\"): %d\r\n", __func__, path, fres);
+            break;
+        }
+
+        /* read from file and write to uart in chunks until eof */
+        UINT bytes_read;
+        do {
+            unsigned char buf[128];
+            if ((fres = f_read(fp, buf, sizeof(buf), &bytes_read))) {
+                dprintf(2, "error: %s: f_read(): %d\r\n", __func__, fres);
+                break;
+            }
+
+            /* write to uart with card unlocked */
+            card_unlock();
+            write(2, buf, bytes_read);
+            card_lock();
+
+            /* let other tasks do some work */
+            __SEV();
+            yield();
+        } while (bytes_read && !fres);
+
+        if (fres) break;
+
+        /* make sure we emit a newline to unlock the uart */
+        dprintf(2, "\r\n");
+
+        if ((fres = f_close(fp))) {
+            dprintf(2, "%s: f_close(\"%s\"): %d\r\n", __func__, path, fres);
+            break;
+        }
+
+        card_release();
+        return 0;
+
+    } while(0);
+
+    card_release();
+    return -1;
+}
+
 static int bme280_read_and_print(void) {
     long temp_hundredths;
     unsigned long pressure_256ths, humidity_1024ths;
@@ -563,6 +617,8 @@ int main(void) {
 
             else if (!strcmp(line, "ls"))
                 ls();
+            else if (line == strstr(line, "cat "))
+                cat(line + 4);
 
             else if (line == strstr(line, "ecezo ") && !child_is_running(&child_sample.child))
                 ecezo_command(line + 6);
