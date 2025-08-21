@@ -168,8 +168,8 @@ int sys_to_ds3231(void) {
     do {
         const unsigned long long unix_microseconds_now = timer_time_us_64(timer_hw) + unix_microseconds_at_t0;
 
-        /* a time at least 100 ms in the future TODO: subtract offset of seconds field within transaction */
-        unix_microseconds_target = ((unix_microseconds_now + 1100000ULL) / 1000000ULL) * 1000000ULL;
+        /* a time at least 100 ms in the future TODO: subtract actual offset of seconds field within transaction */
+        unix_microseconds_target = ((unix_microseconds_now + 1100000ULL) / 1000000ULL) * 1000000ULL - 364;
 
         /* populate the nearest integer struct tm while we wait for it to be then */
         if (!gmtime_r(&(time_t) { (unix_microseconds_target + 500000ULL) / 1000000ULL }, &tm)) {
