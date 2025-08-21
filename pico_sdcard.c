@@ -292,7 +292,7 @@ int record(void) {
 
     /* loop until we get to the first available filename */
     unsigned file_id = 0;
-    char path[] = "000000.txt";
+    char path[] = "000000.csv";
 
     while (1) {
         set_first_value_in_string(path, file_id);
@@ -390,6 +390,10 @@ int record(void) {
         dprintf(2, "%s: f_close(\"%s\"): %d\r\n", __func__, path, fres);
         return -1;
     }
+
+    card_unlock();
+    dprintf(2, "%s: closed \"%s\"\r\n", __func__, path);
+    card_lock();
 
     return 0;
 }
