@@ -556,7 +556,7 @@ int main(void) {
 
     cooperative_uart_init();
 
-    dprintf(2, "\r\nhello\r\n");
+    dprintf(2, "\r\n%s: built from %s\r\n", PROGNAME, GIT_VERSION);
 
     if (-1 == ds3231_to_sys())
         dprintf(2, "%s: could not read ds3231\r\n", PROGNAME);

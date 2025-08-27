@@ -14,6 +14,18 @@ if (NOT DEFINED PICO_TOOLCHAIN_PATH)
     )
 endif()
 
+execute_process(COMMAND git describe --always --dirty --exclude '*'
+                OUTPUT_VARIABLE GIT_HASH
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+execute_process(COMMAND sh -c "TZ=UTC git log -1 --format=%cd --date=format-local:'%Y%m%dT%H%MZ'"
+                OUTPUT_VARIABLE GIT_STAMP
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+execute_process(COMMAND sh -c "TZ=UTC git log -1 --format=%cd --date=format-local:'%sULL'"
+                OUTPUT_VARIABLE GIT_TIME
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+
 # initialize the SDK directly
 include($ENV{PICO_SDK_PATH}/pico_sdk_init.cmake)
 
@@ -42,6 +54,9 @@ add_executable(pico_sdcard
 
 # add some warning flags TODO: figure out how to make these only apply to the above files
 target_compile_options(pico_sdcard PRIVATE -Wall -Wextra -Wshadow -Wdouble-promotion)
+
+# make git hash and time available to c preprocessor
+target_compile_options(pico_sdcard PRIVATE -DGIT_VERSION="${GIT_HASH} \(${GIT_STAMP}\)" -DGIT_TIME=${GIT_TIME})
 
 # pull in common dependencies
 target_link_libraries(pico_sdcard pico_stdlib cmsis_core hardware_dma hardware_pio hardware_spi hardware_i2c)
