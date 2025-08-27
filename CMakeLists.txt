@@ -22,9 +22,6 @@ project(my_project)
 # initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-# add some warning flags
-set("CMAKE_C_FLAGS" "${CMAKE_C_FLAGS}  -Wall -Wextra -Wshadow")
-
 # rest of your project
 add_executable(pico_sdcard
     pico_sdcard.c
@@ -43,10 +40,11 @@ add_executable(pico_sdcard
     rp2350_bme280.c
 )
 
+# add some warning flags TODO: figure out how to make these only apply to the above files
+target_compile_options(pico_sdcard PRIVATE -Wall -Wextra -Wshadow -Wdouble-promotion)
+
 # pull in common dependencies
 target_link_libraries(pico_sdcard pico_stdlib cmsis_core hardware_dma hardware_pio hardware_spi hardware_i2c)
-
-pico_enable_stdio_uart(pico_sdcard 1)
 
 # create map/bin/hex/uf2 file in addition to ELF.
 pico_add_extra_outputs(pico_sdcard)
