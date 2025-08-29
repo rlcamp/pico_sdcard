@@ -122,6 +122,35 @@ void lower_power_sleep_ms(const unsigned delay_ms) {
     timer_hardware_alarm_unclaim(timer_hw, alarm_num);
 }
 
+/* allow an enable line to be shared between peripherals */
+static volatile unsigned char enable_line_users = 0;
+
+void enable_line_request(void) {
+    /* cooperative lock is necessary so that we can yield within the init path */
+    static volatile unsigned char locked = 0;
+    while (locked) yield();
+    locked = 1;
+
+    if (!(enable_line_users++)) {
+        gpio_init(22);
+        gpio_set_dir(22, GPIO_OUT);
+        gpio_put(22, 1);
+
+        /* wait for inrush current, must also be > 1 ms for sdmmc */
+        lower_power_sleep_ms(50);
+    }
+
+    locked = 0;
+    __SEV();
+}
+
+void enable_line_release(void) {
+    if (!(--enable_line_users)) {
+        gpio_put(22, 0);
+        gpio_deinit(22);
+    }
+}
+
 /* length-two ring buffer populated by one task and consumed by zero or more others */
 #define SAMPLE_RING_BUFFER_COUNT 4
 _Static_assert(!(SAMPLE_RING_BUFFER_COUNT & (SAMPLE_RING_BUFFER_COUNT - 1)), "ring buffer must be a power of two");

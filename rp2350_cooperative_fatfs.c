@@ -12,6 +12,10 @@ extern unsigned char diskio_initted;
 extern void yield(void);
 extern void lower_power_sleep_ms(unsigned);
 
+/* these can be overridden to enable/disable power to the card */
+__attribute((weak)) void enable_line_request(void) { }
+__attribute((weak)) void enable_line_release(void) { }
+
 __attribute((aligned(4))) FATFS * fs = &(static FATFS) { };
 
 static volatile unsigned char card_locked = 0, card_users = 0;
@@ -31,11 +35,7 @@ int card_request(void) {
 
     if (!(card_users++)) {
         /* enable power to card */
-        gpio_init(22);
-        gpio_set_dir(22, GPIO_OUT);
-        gpio_put(22, 1);
-
-        lower_power_sleep_ms(10);
+        enable_line_request();
 
         /* we have a guarantee that when the above returns, it has been at least 1 ms since
          power was applied to the sd card */
@@ -64,8 +64,7 @@ void card_release(void) {
          the card has been power cycled and will have to be initted when mounting again */
         diskio_initted = 0;
 
-        gpio_put(22, 0);
-        gpio_deinit(22);
+        enable_line_release();
     }
 
     card_unlock();
