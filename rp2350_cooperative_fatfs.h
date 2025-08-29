@@ -8,3 +8,8 @@ void card_unlock(void);
 
 int ls(void);
 int cat(const char * path);
+
+/* third party includes */
+#include "ff.h"
+
+extern FATFS * fs;

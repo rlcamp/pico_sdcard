@@ -6,16 +6,13 @@
 #include <stdio.h>
 #include <unistd.h>
 
-/* third party includes */
-#include "ff.h"
-
 /* need to be able to tell fatfs internals that it will have to reinit the card */
 extern unsigned char diskio_initted;
 
 extern void yield(void);
 extern void lower_power_sleep_ms(unsigned);
 
-__attribute((aligned(4))) static FATFS * fs = &(static FATFS) { };
+__attribute((aligned(4))) FATFS * fs = &(static FATFS) { };
 
 static volatile unsigned char card_locked = 0, card_users = 0;
 
