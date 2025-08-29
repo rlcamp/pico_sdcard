@@ -15,6 +15,7 @@
 #include <stdio.h>
 
 size_t card_overhead_numerator = 0, card_overhead_denominator = 0;
+unsigned long microseconds_in_wait = 0;
 
 __attribute((weak)) volatile unsigned char verbose = 0;
 
@@ -73,6 +74,7 @@ static uint8_t command_and_r1_response(const uint8_t cmd, const uint32_t arg) {
 }
 
 static void wait_for_card_ready(void) {
+    const unsigned long timerawl_prior = timer_hw->timerawl;
     spi_set_format(spi1, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
     uint16_t ret;
     do {
@@ -80,6 +82,7 @@ static void wait_for_card_ready(void) {
         card_overhead_numerator += 2;
     } while (ret != 0xFFFF);
     spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+    microseconds_in_wait += timer_hw->timerawl - timerawl_prior;
 }
 
 static uint32_t spi_receive_uint32be(void) {
@@ -365,8 +368,8 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         wait_for_card_ready();
         const unsigned timerawl_elapsed = timer_hw->timerawl - timerawl_prior;
 
-        if (verbose >= 1)
-            dprintf(2, "%s: wrote block, finishing took %u us, crc 0x%04X\r\n", __func__, timerawl_elapsed, crc_dma);
+        if (verbose >= 2)
+            dprintf(2, "%s: %u us\r\n", __func__, timerawl_elapsed);
 
         if (0b00101 != response) {
             if (0b01011 == response)
