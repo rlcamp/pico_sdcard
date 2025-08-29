@@ -302,13 +302,14 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
 
         const uint dma_tx = dma_claim_unused_channel(true);
 
+        static const uint16_t zero_word = 0;
         dma_channel_config cfg = dma_channel_get_default_config(dma_tx);
         channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
         channel_config_set_dreq(&cfg, spi_get_dreq(spi1, true));
-        channel_config_set_read_increment(&cfg, true);
+        channel_config_set_read_increment(&cfg, block ? true : false);
         channel_config_set_write_increment(&cfg, false);
         channel_config_set_bswap(&cfg, true);
-        dma_channel_configure(dma_tx, &cfg, &spi_get_hw(spi1)->dr, block, 256, false);
+        dma_channel_configure(dma_tx, &cfg, &spi_get_hw(spi1)->dr, block ? block : (void *)&zero_word, 256, false);
 
         dma_channel_acknowledge_irq1(dma_tx);
 
