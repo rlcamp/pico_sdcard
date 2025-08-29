@@ -14,6 +14,8 @@
 
 #include <stdio.h>
 
+size_t card_overhead_numerator = 0, card_overhead_denominator = 0;
+
 __attribute((weak)) volatile unsigned char verbose = 0;
 
 __attribute((weak)) void yield(void) {
@@ -31,6 +33,7 @@ static void cs_high(void) {
 static uint8_t spi_receive_one_byte_with_rx_enabled(void) {
     uint8_t ret = 0;
     spi_read_blocking(spi1, 0xFF, &ret, 1);
+    card_overhead_numerator++;
     return ret;
 }
 
@@ -61,6 +64,7 @@ static void send_command_with_crc7(const uint8_t cmd, const uint32_t arg) {
     msg[5] |= crc7_left_shifted(msg, 5);
 
     spi_write_blocking(spi1, msg, 6);
+    card_overhead_numerator += 6;
 }
 
 static uint8_t command_and_r1_response(const uint8_t cmd, const uint32_t arg) {
@@ -68,14 +72,12 @@ static uint8_t command_and_r1_response(const uint8_t cmd, const uint32_t arg) {
     return r1_response();
 }
 
-unsigned long card_overhead_numerator = 0;
-
 static void wait_for_card_ready(void) {
     spi_set_format(spi1, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
     uint16_t ret;
     do {
         spi_read16_blocking(spi1, 0xFFFF, &ret, 1);
-        card_overhead_numerator++;
+        card_overhead_numerator += 2;
     } while (ret != 0xFFFF);
     spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
 }
@@ -83,6 +85,7 @@ static void wait_for_card_ready(void) {
 static uint32_t spi_receive_uint32be(void) {
     uint32_t ret;
     spi_read_blocking(spi1, 0xFF, (void *)&ret, 4);
+    card_overhead_numerator += 4;
     return __builtin_bswap32(ret);
 }
 
@@ -243,13 +246,14 @@ int spi_sd_write_blocks_start(unsigned long long block_address) {
 
     /* extra byte prior to data packet */
     spi_write_blocking(spi1, (unsigned char[1]) { 0xff }, 1);
-
+    card_overhead_numerator++;
     return 0;
 }
 
 void spi_sd_write_blocks_end(void) {
     /* send stop tran token */
     spi_write_blocking(spi1, (unsigned char[2]) { 0xfd, 0xff }, 2);
+    card_overhead_numerator += 2;
 
     wait_for_card_ready();
 
@@ -322,6 +326,7 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
             yield();
 
         card_overhead_numerator += 512;
+        card_overhead_denominator += 512;
 
         /* disable and clear the irq that caused wfe to return due to sevonpend */
         dma_channel_acknowledge_irq1(dma_tx);
@@ -481,6 +486,8 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
             dprintf(2, "%s: received crc 0x%04X, dma 0x%04X, %u wakes\r\n",
                     __func__, crc_received, crc_dma, wakes);
 
+        card_overhead_numerator += 512 + 2 + 1;
+
         if (crc_received != crc_dma) {
             cs_high();
             spi_deinit(spi1);
@@ -495,6 +502,7 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
 
         /* CMD12 wants an extra byte prior to the response */
         spi_write_blocking(spi1, (unsigned char[1]) { 0xff }, 1);
+        card_overhead_numerator += 2;
 
         (void)r1_response();
         wait_for_card_ready();
