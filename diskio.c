@@ -31,7 +31,7 @@ static size_t icache = 0;
 DSTATUS disk_initialize(BYTE pdrv) {
     (void)pdrv;
     if (!diskio_initted) {
-        if (-1 == spi_sd_init()) return STA_NOINIT;
+        if (-1 == spi_sd_init(0)) return STA_NOINIT;
     }
 
     __builtin_memset(block_cache_sectors, 0, sizeof(block_cache_sectors));

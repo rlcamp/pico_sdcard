@@ -93,7 +93,11 @@ static uint32_t spi_receive_uint32be(void) {
     return __builtin_bswap32(ret);
 }
 
-int spi_sd_init(void) {
+void spi_sd_restore_baud_rate(void) {
+    requested_baud_rate = clock_get_hz(clk_peri) / 2U;
+}
+
+int spi_sd_init(unsigned baud_rate_reduction) {
     spi_init(spi1, 400000);
     gpio_set_function(10, GPIO_FUNC_SPI);
     gpio_set_function(11, GPIO_FUNC_SPI);
@@ -200,7 +204,7 @@ int spi_sd_init(void) {
         dprintf(2, "%s: cmd55+acmd41 success\r\n", __func__);
 
     spi_deinit(spi1);
-    requested_baud_rate = clock_get_hz(clk_peri) / 2U;
+    requested_baud_rate = clock_get_hz(clk_peri) / (2U + baud_rate_reduction);
     const unsigned actual_baud = spi_init(spi1, requested_baud_rate);
     if (verbose >= 1)
         dprintf(2, "%s: baud rate set to %u\r\n", __func__, actual_baud);
