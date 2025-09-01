@@ -6,11 +6,12 @@
 #include "hardware/spi.h"
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
+#include "hardware/clocks.h"
 #include "RP2350.h"
 
 #include "rp2350_sdcard.h"
 
-#define BAUD_RATE_FAST 24000000
+static unsigned requested_baud_rate = 0;
 
 #include <stdio.h>
 
@@ -199,7 +200,8 @@ int spi_sd_init(void) {
         dprintf(2, "%s: cmd55+acmd41 success\r\n", __func__);
 
     spi_deinit(spi1);
-    const unsigned actual_baud = spi_init(spi1, BAUD_RATE_FAST);
+    requested_baud_rate = clock_get_hz(clk_peri) / 2U;
+    const unsigned actual_baud = spi_init(spi1, requested_baud_rate);
     if (verbose >= 1)
         dprintf(2, "%s: baud rate set to %u\r\n", __func__, actual_baud);
 
@@ -236,7 +238,7 @@ int spi_sd_init(void) {
 }
 
 int spi_sd_write_blocks_start(unsigned long long block_address) {
-    spi_init(spi1, BAUD_RATE_FAST);
+    spi_init(spi1, requested_baud_rate);
     cs_low();
     wait_for_card_ready();
 
@@ -265,7 +267,7 @@ void spi_sd_write_blocks_end(void) {
 }
 
 int spi_sd_write_pre_erase(unsigned long blocks) {
-    spi_init(spi1, BAUD_RATE_FAST);
+    spi_init(spi1, requested_baud_rate);
     cs_low();
     wait_for_card_ready();
 
@@ -398,7 +400,7 @@ int spi_sd_write_blocks(const void * buf, const unsigned long blocks, const unsi
 }
 
 int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long block_address) {
-    spi_init(spi1, BAUD_RATE_FAST);
+    spi_init(spi1, requested_baud_rate);
     cs_low();
     wait_for_card_ready();
 
