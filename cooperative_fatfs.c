@@ -1,4 +1,4 @@
-#include "rp2350_cooperative_fatfs.h"
+#include "cooperative_fatfs.h"
 #include "RP2350.h"
 
 #include "hardware/gpio.h"

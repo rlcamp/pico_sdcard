@@ -22,7 +22,7 @@
 /* other open source or project-agnostic includes by authors */
 #include "cortex_m_cooperative_multitasking.h"
 #include "rp2350_sdcard.h"
-#include "rp2350_cooperative_fatfs.h"
+#include "cooperative_fatfs.h"
 #include "rp2350_cooperative_uart.h"
 #include "rp2350_cooperative_i2c.h"
 #include "rp2350_ds3231.h"
