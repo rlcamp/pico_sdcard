@@ -70,12 +70,12 @@ void card_release(void) {
     card_unlock();
 }
 
-int ls(void) {
+int ls(const char * path) {
     if (-1 == card_request()) return -1;
 
     FRESULT fres;
     static DIR dir;
-    if ((fres = f_opendir(&dir, "")) != FR_OK) {
+    if ((fres = f_opendir(&dir, path ? path : "")) != FR_OK) {
         card_release();
         dprintf(2, "error: %s: f_opendir(): %d\r\n", __func__, fres);
         return -1;

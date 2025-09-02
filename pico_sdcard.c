@@ -502,8 +502,10 @@ int main(void) {
             else if (!strcmp(line, "stop"))
                 stop_requested = 1;
 
+            else if (line == strstr(line, "ls "))
+                ls(line + 3);
             else if (!strcmp(line, "ls"))
-                ls();
+                ls(NULL);
             else if (line == strstr(line, "cat "))
                 cat(line + 4);
 
