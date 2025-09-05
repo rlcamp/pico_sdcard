@@ -97,8 +97,20 @@ void spi_sd_restore_baud_rate(void) {
     requested_baud_rate = clock_get_hz(clk_peri) / 2U;
 }
 
+static void spi_enable(unsigned baud) {
+    clocks_hw->wake_en1 |= CLOCKS_WAKE_EN1_CLK_SYS_SPI1_BITS | CLOCKS_WAKE_EN1_CLK_PERI_SPI1_BITS;
+    clocks_hw->sleep_en1 |= CLOCKS_SLEEP_EN1_CLK_SYS_SPI1_BITS | CLOCKS_SLEEP_EN1_CLK_PERI_SPI1_BITS;
+    spi_init(spi1, baud);
+}
+
+static void spi_disable(void) {
+    spi_deinit(spi1);
+    clocks_hw->wake_en1 &= ~(CLOCKS_WAKE_EN1_CLK_SYS_SPI1_BITS | CLOCKS_WAKE_EN1_CLK_PERI_SPI1_BITS);
+    clocks_hw->sleep_en1 &= ~(CLOCKS_SLEEP_EN1_CLK_SYS_SPI1_BITS | CLOCKS_SLEEP_EN1_CLK_PERI_SPI1_BITS);
+}
+
 int spi_sd_init(unsigned baud_rate_reduction) {
-    spi_init(spi1, 400000);
+    spi_enable(400000);
     gpio_set_function(10, GPIO_FUNC_SPI);
     gpio_set_function(11, GPIO_FUNC_SPI);
     gpio_set_function(12, GPIO_FUNC_SPI);
@@ -141,7 +153,7 @@ int spi_sd_init(unsigned baud_rate_reduction) {
     for (size_t ipass = 0;; ipass++) {
         if (ipass > 3) {
             /* TODO: find out how many times we should try this before giving up */
-            spi_deinit(spi1);
+            spi_disable();
             return -1;
         }
         cs_low();
@@ -168,7 +180,7 @@ int spi_sd_init(unsigned baud_rate_reduction) {
     wait_for_card_ready();
     if (command_and_r1_response(59, 1) > 1) {
         cs_high();
-        spi_deinit(spi1);
+        spi_disable();
         return -1;
     }
     cs_high();
@@ -179,7 +191,7 @@ int spi_sd_init(unsigned baud_rate_reduction) {
     /* cmd55, then acmd41, init. must loop this until the response is 0 */
     for (size_t ipass = 0;; ipass++) {
         if (ipass > 2500) {
-            spi_deinit(spi1);
+            spi_disable();
             dprintf(2, "%s: giving up\r\n", __func__);
             return -1;
         }
@@ -228,7 +240,7 @@ int spi_sd_init(unsigned baud_rate_reduction) {
 
         /* we get here on overall success of this function */
         cs_high();
-        spi_deinit(spi1);
+        spi_disable();
 
         if (verbose >= 1)
             dprintf(2, "%s: success\r\n", __func__);
@@ -237,19 +249,19 @@ int spi_sd_init(unsigned baud_rate_reduction) {
 
     /* we get here on failure */
     cs_high();
-    spi_deinit(spi1);
+    spi_disable();
     return -1;
 }
 
 int spi_sd_write_blocks_start(unsigned long long block_address) {
-    spi_init(spi1, requested_baud_rate);
+    spi_enable(requested_baud_rate);
     cs_low();
     wait_for_card_ready();
 
     const uint8_t response = command_and_r1_response(25, block_address);
     if (response != 0) {
         cs_high();
-        spi_deinit(spi1);
+        spi_disable();
         return -1;
     }
 
@@ -267,11 +279,11 @@ void spi_sd_write_blocks_end(void) {
     wait_for_card_ready();
 
     cs_high();
-    spi_deinit(spi1);
+    spi_disable();
 }
 
 int spi_sd_write_pre_erase(unsigned long blocks) {
-    spi_init(spi1, requested_baud_rate);
+    spi_enable(requested_baud_rate);
     cs_low();
     wait_for_card_ready();
 
@@ -279,7 +291,7 @@ int spi_sd_write_pre_erase(unsigned long blocks) {
     cs_high();
 
     if (cmd55_r1_response > 1) {
-        spi_deinit(spi1);
+        spi_disable();
         return -1;
     }
 
@@ -289,7 +301,7 @@ int spi_sd_write_pre_erase(unsigned long blocks) {
     const uint8_t acmd23_r1_response = command_and_r1_response(23, blocks);
 
     cs_high();
-    spi_deinit(spi1);
+    spi_disable();
 
     return acmd23_r1_response ? -1 : 0;
 }
@@ -385,7 +397,7 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
                 dprintf(2, "%s: error 0x%x\r\n", __func__, response);
 
             cs_high();
-            spi_deinit(spi1);
+            spi_disable();
             return -1;
         }
     }
@@ -404,14 +416,14 @@ int spi_sd_write_blocks(const void * buf, const unsigned long blocks, const unsi
 }
 
 int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long block_address) {
-    spi_init(spi1, requested_baud_rate);
+    spi_enable(requested_baud_rate);
     cs_low();
     wait_for_card_ready();
 
     /* send cmd17 or cmd18 */
     if (command_and_r1_response(blocks > 1 ? 18 : 17, block_address) != 0) {
         cs_high();
-        spi_deinit(spi1);
+        spi_disable();
         dprintf(2, "%s(%d): fail\r\n", __func__, __LINE__);
         return -1;
     }
@@ -425,7 +437,7 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         /* when we break out of the above loop, we've read the Data Token byte */
         if (0xFE != result) {
             cs_high();
-            spi_deinit(spi1);
+            spi_disable();
             dprintf(2, "%s(%d): fail\r\n", __func__, __LINE__);
             return -1;
         }
@@ -500,7 +512,7 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
 
         if (crc_received != crc_dma) {
             cs_high();
-            spi_deinit(spi1);
+            spi_disable();
             dprintf(2, "%s: bad crc\r\n", __func__);
             return -1;
         }
@@ -519,7 +531,7 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
     }
 
     cs_high();
-    spi_deinit(spi1);
+    spi_disable();
 
     return 0;
 }

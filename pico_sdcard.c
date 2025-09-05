@@ -404,6 +404,8 @@ int main(void) {
 
     scb_hw->scr |= M33_SCR_SLEEPDEEP_BITS;
 
+    /* TODO: figure out why power consumption is much higher when not recording */
+
     /* turn off clocks to a bunch of stuff we aren't (yet) using */
     clocks_hw->wake_en1 = (CLOCKS_WAKE_EN1_BITS &
                            ~(CLOCKS_WAKE_EN1_CLK_USB_BITS|
@@ -411,6 +413,8 @@ int main(void) {
                              CLOCKS_WAKE_EN1_CLK_SYS_UART1_BITS |
                              CLOCKS_WAKE_EN1_CLK_PERI_UART1_BITS |
                              CLOCKS_WAKE_EN1_CLK_SYS_TRNG_BITS |
+                             CLOCKS_WAKE_EN1_CLK_SYS_SPI1_BITS |
+                             CLOCKS_WAKE_EN1_CLK_PERI_SPI1_BITS |
                              CLOCKS_WAKE_EN1_CLK_SYS_SPI0_BITS |
                              CLOCKS_WAKE_EN1_CLK_PERI_SPI0_BITS));
 
