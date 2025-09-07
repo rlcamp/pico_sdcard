@@ -75,11 +75,16 @@ static uint8_t command_and_r1_response(const uint8_t cmd, const uint32_t arg) {
 }
 
 static void wait_for_card_ready(void) {
+    spi_hw_t * spi_hw = spi_get_hw(spi1);
+
     const unsigned long timerawl_prior = timer_hw->timerawl;
     spi_set_format(spi1, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
     uint16_t ret;
     do {
-        spi_read16_blocking(spi1, 0xFFFF, &ret, 1);
+        while (!(spi_hw->sr & SPI_SSPSR_TNF_BITS));
+        spi_hw->dr = 0xFFFF;
+        while (!(spi_hw->sr & SPI_SSPSR_RNE_BITS));
+        ret = spi_hw->dr;
         card_overhead_numerator += 2;
     } while (ret != 0xFFFF);
     spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
