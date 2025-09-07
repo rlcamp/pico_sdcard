@@ -15,8 +15,11 @@ static unsigned requested_baud_rate = 0;
 
 #include <stdio.h>
 
+size_t bytes_outside_wait = 0;
+size_t bytes_in_wait = 0;
 size_t card_overhead_numerator = 0, card_overhead_denominator = 0;
 unsigned long microseconds_in_wait = 0;
+unsigned long microseconds_in_data = 0;
 
 __attribute((weak)) volatile unsigned char verbose = 0;
 
@@ -77,6 +80,7 @@ static uint8_t command_and_r1_response(const uint8_t cmd, const uint32_t arg) {
 static void wait_for_card_ready(void) {
     spi_hw_t * spi_hw = spi_get_hw(spi1);
 
+    const unsigned long card_overhead_numerator_prior = card_overhead_numerator;
     const unsigned long timerawl_prior = timer_hw->timerawl;
     spi_set_format(spi1, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
     uint16_t ret;
@@ -88,6 +92,7 @@ static void wait_for_card_ready(void) {
         card_overhead_numerator += 2;
     } while (ret != 0xFFFF);
     spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+    bytes_in_wait += card_overhead_numerator - card_overhead_numerator_prior;
     microseconds_in_wait += timer_hw->timerawl - timerawl_prior;
 }
 
@@ -258,6 +263,11 @@ int spi_sd_init(unsigned baud_rate_reduction) {
     return -1;
 }
 
+static unsigned long microseconds_in_wait_prior = 0;
+static unsigned long microseconds_in_data_prior = 0;
+static unsigned long bytes_in_wait_prior = 0;
+static unsigned long bytes_in_data_prior = 0;
+
 int spi_sd_write_blocks_start(unsigned long long block_address) {
     spi_enable(requested_baud_rate);
     cs_low();
@@ -273,6 +283,10 @@ int spi_sd_write_blocks_start(unsigned long long block_address) {
     /* extra byte prior to data packet */
     spi_write_blocking(spi1, (unsigned char[1]) { 0xff }, 1);
     card_overhead_numerator++;
+    microseconds_in_wait_prior = microseconds_in_wait;
+    microseconds_in_data_prior = microseconds_in_data;
+    bytes_in_wait_prior = bytes_in_wait;
+    bytes_in_data_prior = card_overhead_denominator;
     return 0;
 }
 
@@ -285,6 +299,15 @@ void spi_sd_write_blocks_end(void) {
 
     cs_high();
     spi_disable();
+
+    const unsigned long us_in_data_elapsed = microseconds_in_data - microseconds_in_data_prior;
+    const unsigned long us_in_wait_elapsed = microseconds_in_wait - microseconds_in_wait_prior;
+    if (verbose >= 1)
+        dprintf(2, "%s: %lu us, %lu kBd in data, %lu us, %lu kBd in wait\r\n", __func__,
+                us_in_data_elapsed,
+                (unsigned long)(((card_overhead_denominator - bytes_in_data_prior) * 8000ULL + us_in_data_elapsed / 2) / us_in_data_elapsed),
+                us_in_wait_elapsed,
+                (unsigned long)(((bytes_in_wait - bytes_in_wait_prior) * 8000ULL + us_in_wait_elapsed / 2) / us_in_wait_elapsed));
 }
 
 int spi_sd_write_pre_erase(unsigned long blocks) {
@@ -322,6 +345,8 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         while (spi_is_busy(spi1));
 
         spi_set_format(spi1, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+
+        const unsigned long timerawl_prior = timer_hw->timerawl;
 
         const uint dma_tx = dma_claim_unused_channel(true);
 
@@ -388,12 +413,9 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         card_overhead_numerator++;
         response &= 0b11111;
 
-        const unsigned timerawl_prior = timer_hw->timerawl;
-        wait_for_card_ready();
-        const unsigned timerawl_elapsed = timer_hw->timerawl - timerawl_prior;
+        microseconds_in_data += timer_hw->timerawl - timerawl_prior;
 
-        if (verbose >= 2)
-            dprintf(2, "%s: %u us\r\n", __func__, timerawl_elapsed);
+        wait_for_card_ready();
 
         if (0b00101 != response) {
             if (0b01011 == response)
