@@ -83,13 +83,15 @@ static void wait_for_card_ready(void) {
     spi_hw_t * spi_hw = spi_get_hw(spi1);
     const unsigned long timerawl_prior = timer_hw->timerawl;
 
-    /* first try clocking out 8 bits using the spi peripheral */
-    while (!(spi_hw->sr & SPI_SSPSR_TNF_BITS));
-    spi_hw->dr = 0xFF;
-    while (!(spi_hw->sr & SPI_SSPSR_RNE_BITS));
-    if (0xFF == spi_hw->dr) {
-        microseconds_in_wait += timer_hw->timerawl - timerawl_prior;
-        return;
+    /* first try clocking out a few bytes using the spi peripheral */
+    for (size_t iattempt = 0; iattempt < 16; iattempt++) {
+        while (!(spi_hw->sr & SPI_SSPSR_TNF_BITS));
+        spi_hw->dr = 0xFF;
+        while (!(spi_hw->sr & SPI_SSPSR_RNE_BITS));
+        if (0xFF == spi_hw->dr) {
+            microseconds_in_wait += timer_hw->timerawl - timerawl_prior;
+            return;
+        }
     }
 
     clocks_hw->wake_en0 |= CLOCKS_WAKE_EN0_CLK_SYS_PIO1_BITS;
