@@ -59,6 +59,8 @@ target_compile_options(pico_sdcard PRIVATE -Wall -Wextra -Wshadow -Wdouble-promo
 # make git hash and time available to c preprocessor
 target_compile_options(pico_sdcard PRIVATE -DGIT_VERSION="${GIT_HASH} \(${GIT_STAMP}\)" -DGIT_TIME=${GIT_TIME})
 
+pico_generate_pio_header(pico_sdcard ${CMAKE_CURRENT_LIST_DIR}/rp2350_sdcard.pio)
+
 # pull in common dependencies
 target_link_libraries(pico_sdcard pico_stdlib cmsis_core hardware_dma hardware_pio hardware_spi hardware_i2c)
 

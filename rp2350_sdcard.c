@@ -7,9 +7,11 @@
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
 #include "hardware/clocks.h"
+#include "hardware/pio.h"
 #include "RP2350.h"
 
 #include "rp2350_sdcard.h"
+#include "rp2350_sdcard.pio.h"
 
 static unsigned requested_baud_rate = 0;
 
@@ -79,20 +81,78 @@ static uint8_t command_and_r1_response(const uint8_t cmd, const uint32_t arg) {
 
 static void wait_for_card_ready(void) {
     spi_hw_t * spi_hw = spi_get_hw(spi1);
-
-    const unsigned long card_overhead_numerator_prior = card_overhead_numerator;
     const unsigned long timerawl_prior = timer_hw->timerawl;
-    spi_set_format(spi1, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
-    uint16_t ret;
-    do {
-        while (!(spi_hw->sr & SPI_SSPSR_TNF_BITS));
-        spi_hw->dr = 0xFFFF;
-        while (!(spi_hw->sr & SPI_SSPSR_RNE_BITS));
-        ret = spi_hw->dr;
-        card_overhead_numerator += 2;
-    } while (ret != 0xFFFF);
-    spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
-    bytes_in_wait += card_overhead_numerator - card_overhead_numerator_prior;
+
+    /* first try clocking out 8 bits using the spi peripheral */
+    while (!(spi_hw->sr & SPI_SSPSR_TNF_BITS));
+    spi_hw->dr = 0xFF;
+    while (!(spi_hw->sr & SPI_SSPSR_RNE_BITS));
+    if (0xFF == spi_hw->dr) {
+        microseconds_in_wait += timer_hw->timerawl - timerawl_prior;
+        return;
+    }
+
+    clocks_hw->wake_en0 |= CLOCKS_WAKE_EN0_CLK_SYS_PIO1_BITS;
+    clocks_hw->sleep_en0 |= CLOCKS_SLEEP_EN0_CLK_SYS_PIO1_BITS;
+
+    PIO pio = pio1;
+    unsigned int sm = pio_claim_unused_sm(pio, true);
+    unsigned int offset = pio_add_program(pio, &wait_for_card_ready_program);
+
+    gpio_set_dir(10, GPIO_OUT);
+    gpio_set_dir(11, GPIO_OUT);
+    gpio_set_dir(12, GPIO_IN);
+
+    gpio_put(10, 0);
+    gpio_put(11, 1);
+    gpio_put(12, 0);
+
+    pio_gpio_init(pio, 10);
+    pio_gpio_init(pio, 11);
+    pio_gpio_init(pio, 12);
+
+    pio_sm_set_consecutive_pindirs(pio, sm, 10, 2, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, 12, 1, false);
+
+    pio_sm_config sm_config = wait_for_card_ready_program_get_default_config(offset);
+    sm_config_set_sideset_pins(&sm_config, 10);
+    sm_config_set_jmp_pin(&sm_config, 12);
+    sm_config_set_clkdiv_int_frac8(&sm_config, clock_get_hz(clk_sys) / (2 * requested_baud_rate), 0);
+    pio_sm_init(pio, sm, offset, &sm_config);
+
+    hw_set_bits(&pio->input_sync_bypass, 1U << 12);
+    __DSB();
+
+    pio_set_irq0_source_enabled(pio, pis_interrupt0, true);
+    pio_interrupt_clear(pio, sm);
+    irq_set_enabled(PIO_IRQ_NUM(pio, 0), false);
+
+    pio_sm_set_enabled(pio, sm, true);
+
+    /* wait for interrupt from pio */
+    __SEV();
+    unsigned wakes = 0;
+    while (!pio_interrupt_get(pio, 0)) {
+        yield();
+        wakes++;
+    }
+
+    /* disable sm BEFORE clearing interrupt so it does not resume executing */
+    pio_sm_set_enabled(pio, sm, false);
+
+    pio_set_irq0_source_enabled(pio, pis_interrupt0, false);
+    pio_interrupt_clear(pio, 0);
+    irq_clear(PIO_IRQ_NUM(pio, 0));
+
+    pio_remove_program_and_unclaim_sm(&wait_for_card_ready_program, pio, sm, offset);
+
+    clocks_hw->wake_en0 &= ~CLOCKS_WAKE_EN0_CLK_SYS_PIO1_BITS;
+    clocks_hw->sleep_en0 &= ~CLOCKS_SLEEP_EN0_CLK_SYS_PIO1_BITS;
+
+    gpio_set_function(10, GPIO_FUNC_SPI);
+    gpio_set_function(11, GPIO_FUNC_SPI);
+    gpio_set_function(12, GPIO_FUNC_SPI);
+
     microseconds_in_wait += timer_hw->timerawl - timerawl_prior;
 }
 

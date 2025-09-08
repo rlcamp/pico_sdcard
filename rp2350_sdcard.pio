@@ -1,0 +1,6 @@
+.program wait_for_card_ready
+.side_set 2
+
+repeat: jmp pin done side 0b10
+jmp repeat side 0b11
+done: irq wait 0 side 0b10
