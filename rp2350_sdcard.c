@@ -17,8 +17,6 @@ static unsigned requested_baud_rate = 0;
 
 #include <stdio.h>
 
-size_t bytes_outside_wait = 0;
-size_t bytes_in_wait = 0;
 size_t card_overhead_numerator = 0, card_overhead_denominator = 0;
 unsigned long microseconds_in_wait = 0;
 unsigned long microseconds_in_data = 0;
@@ -327,8 +325,6 @@ int spi_sd_init(unsigned baud_rate_reduction) {
 
 static unsigned long microseconds_in_wait_prior = 0;
 static unsigned long microseconds_in_data_prior = 0;
-static unsigned long bytes_in_wait_prior = 0;
-static unsigned long bytes_in_data_prior = 0;
 
 int spi_sd_write_blocks_start(unsigned long long block_address) {
     spi_enable(requested_baud_rate);
@@ -347,8 +343,6 @@ int spi_sd_write_blocks_start(unsigned long long block_address) {
     card_overhead_numerator++;
     microseconds_in_wait_prior = microseconds_in_wait;
     microseconds_in_data_prior = microseconds_in_data;
-    bytes_in_wait_prior = bytes_in_wait;
-    bytes_in_data_prior = card_overhead_denominator;
     return 0;
 }
 
@@ -362,14 +356,10 @@ void spi_sd_write_blocks_end(void) {
     cs_high();
     spi_disable();
 
-    const unsigned long us_in_data_elapsed = microseconds_in_data - microseconds_in_data_prior;
-    const unsigned long us_in_wait_elapsed = microseconds_in_wait - microseconds_in_wait_prior;
     if (verbose >= 1)
-        dprintf(2, "%s: %lu us, %lu kBd in data, %lu us, %lu kBd in wait\r\n", __func__,
-                us_in_data_elapsed,
-                (unsigned long)(((card_overhead_denominator - bytes_in_data_prior) * 8000ULL + us_in_data_elapsed / 2) / us_in_data_elapsed),
-                us_in_wait_elapsed,
-                (unsigned long)(((bytes_in_wait - bytes_in_wait_prior) * 8000ULL + us_in_wait_elapsed / 2) / us_in_wait_elapsed));
+        dprintf(2, "%s: %lu us in data, %lu us in wait\r\n", __func__,
+                (unsigned long)(microseconds_in_data - microseconds_in_data_prior),
+                (unsigned long)(microseconds_in_wait - microseconds_in_wait_prior));
 }
 
 int spi_sd_write_pre_erase(unsigned long blocks) {
