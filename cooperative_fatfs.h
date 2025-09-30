@@ -12,4 +12,5 @@ int cat(const char * path);
 /* third party includes */
 #include "ff.h"
 
+extern volatile char card_users;
 extern FATFS * fs;

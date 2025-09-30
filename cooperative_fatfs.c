@@ -18,7 +18,8 @@ __attribute((weak)) void enable_line_release(void) { }
 
 __attribute((aligned(4))) FATFS * fs = &(static FATFS) { };
 
-static volatile unsigned char card_locked = 0, card_users = 0;
+static volatile unsigned char card_locked = 0;
+volatile char card_users = 0;
 
 void card_lock(void) {
     while (card_locked) yield();

@@ -10,3 +10,5 @@ extern void i2c_unlock(void);
 
 /* this will return 0 immediately if it acquires the lock, or -1 immediately if it does not */
 extern int i2c_lock_or_fail(void);
+
+extern volatile unsigned char i2c_users;
