@@ -44,6 +44,8 @@ int card_request(void) {
 
         FRESULT fres;
         if ((fres = f_mount(fs, "", 1))) {
+            card_users--;
+            enable_line_release();
             card_unlock();
             if (FR_NOT_READY == fres)
                 dprintf(2, "error: %s: card apparently not present\r\n", __func__);
