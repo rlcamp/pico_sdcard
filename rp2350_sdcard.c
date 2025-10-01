@@ -201,7 +201,7 @@ int spi_sd_init(unsigned baud_rate_reduction) {
     for (size_t ipass = 0;; ipass++) {
         /* if card likely not present, give up */
         if (ipass > 1024) {
-            dprintf(2, "%s(%d): fail\r\n", __func__, __LINE__);
+            spi_disable();
             return -1;
         }
         cs_low();
