@@ -382,6 +382,15 @@ int spi_sd_write_pre_erase(unsigned long blocks) {
 }
 
 int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
+    const uint dma_tx = dma_claim_unused_channel(true);
+
+    dma_channel_config cfg = dma_channel_get_default_config(dma_tx);
+    channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
+    channel_config_set_dreq(&cfg, spi_get_dreq(spi1, true));
+    channel_config_set_read_increment(&cfg, buf ? true : false);
+    channel_config_set_write_increment(&cfg, false);
+    channel_config_set_bswap(&cfg, true);
+
     for (size_t iblock = 0; iblock < blocks; iblock++) {
         const unsigned char * block = buf ? (void *)((unsigned char *)buf + 512 * iblock) : NULL;
 
@@ -394,18 +403,8 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
 
         const unsigned long timerawl_prior = timer_hw->timerawl;
 
-        const uint dma_tx = dma_claim_unused_channel(true);
-
         static const uint16_t zero_word = 0;
-        dma_channel_config cfg = dma_channel_get_default_config(dma_tx);
-        channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
-        channel_config_set_dreq(&cfg, spi_get_dreq(spi1, true));
-        channel_config_set_read_increment(&cfg, block ? true : false);
-        channel_config_set_write_increment(&cfg, false);
-        channel_config_set_bswap(&cfg, true);
         dma_channel_configure(dma_tx, &cfg, &spi_get_hw(spi1)->dr, block ? block : (void *)&zero_word, 256, false);
-
-        dma_channel_acknowledge_irq1(dma_tx);
 
         /* since we are using sevonpend, enable the irq source but disable in nvic */
         dma_channel_set_irq1_enabled(dma_tx, true);
@@ -431,7 +430,7 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         /* retrieve the crc that we calculated on the bytes as they came in */
         const uint16_t crc_dma = dma_sniffer_get_data_accumulator();
 
-        dma_channel_unclaim(dma_tx);
+        dma_channel_cleanup(dma_tx);
         dma_sniffer_disable();
 
         /* wait for the rest of the spi tx fifo to drain, with wfe inhibited because it
@@ -466,9 +465,12 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
 
             cs_high();
             spi_disable();
+            dma_channel_unclaim(dma_tx);
             return -1;
         }
     }
+
+    dma_channel_unclaim(dma_tx);
 
     return 0;
 }
