@@ -92,9 +92,8 @@ static void wait_for_card_ready(void) {
     clocks_hw->wake_en0 |= CLOCKS_WAKE_EN0_CLK_SYS_PIO1_BITS;
     clocks_hw->sleep_en0 |= CLOCKS_SLEEP_EN0_CLK_SYS_PIO1_BITS;
 
-    PIO pio = pio1;
-    unsigned int sm = pio_claim_unused_sm(pio, true);
-    unsigned int offset = pio_add_program(pio, &wait_for_card_ready_program);
+    unsigned int sm = pio_claim_unused_sm(pio1, true);
+    unsigned int offset = pio_add_program(pio1, &wait_for_card_ready_program);
 
     gpio_set_dir(10, GPIO_OUT);
     gpio_set_dir(11, GPIO_OUT);
@@ -104,44 +103,41 @@ static void wait_for_card_ready(void) {
     gpio_put(11, 1);
     gpio_put(12, 0);
 
-    pio_gpio_init(pio, 10);
-    pio_gpio_init(pio, 11);
-    pio_gpio_init(pio, 12);
+    pio_gpio_init(pio1, 10);
+    pio_gpio_init(pio1, 11);
+    pio_gpio_init(pio1, 12);
 
-    pio_sm_set_consecutive_pindirs(pio, sm, 10, 2, true);
-    pio_sm_set_consecutive_pindirs(pio, sm, 12, 1, false);
+    pio_sm_set_consecutive_pindirs(pio1, sm, 10, 2, true);
+    pio_sm_set_consecutive_pindirs(pio1, sm, 12, 1, false);
 
     pio_sm_config sm_config = wait_for_card_ready_program_get_default_config(offset);
     sm_config_set_sideset_pins(&sm_config, 10);
     sm_config_set_jmp_pin(&sm_config, 12);
     sm_config_set_clkdiv_int_frac8(&sm_config, clock_get_hz(clk_sys) / (2 * requested_baud_rate), 0);
-    pio_sm_init(pio, sm, offset, &sm_config);
+    pio_sm_init(pio1, sm, offset, &sm_config);
 
-    hw_set_bits(&pio->input_sync_bypass, 1U << 12);
+    hw_set_bits(&pio1->input_sync_bypass, 1U << 12);
     __DSB();
 
-    pio_set_irq0_source_enabled(pio, pis_interrupt0, true);
-    pio_interrupt_clear(pio, sm);
-    irq_set_enabled(PIO_IRQ_NUM(pio, 0), false);
+    pio_set_irq0_source_enabled(pio1, pis_interrupt0, true);
+    pio_interrupt_clear(pio1, sm);
+    irq_set_enabled(PIO_IRQ_NUM(pio1, 0), false);
 
-    pio_sm_set_enabled(pio, sm, true);
+    pio_sm_set_enabled(pio1, sm, true);
 
     /* wait for interrupt from pio */
     __SEV();
-    unsigned wakes = 0;
-    while (!pio_interrupt_get(pio, 0)) {
+    while (!pio_interrupt_get(pio1, 0))
         yield();
-        wakes++;
-    }
 
     /* disable sm BEFORE clearing interrupt so it does not resume executing */
-    pio_sm_set_enabled(pio, sm, false);
+    pio_sm_set_enabled(pio1, sm, false);
 
-    pio_set_irq0_source_enabled(pio, pis_interrupt0, false);
-    pio_interrupt_clear(pio, 0);
-    irq_clear(PIO_IRQ_NUM(pio, 0));
+    pio_set_irq0_source_enabled(pio1, pis_interrupt0, false);
+    pio_interrupt_clear(pio1, 0);
+    irq_clear(PIO_IRQ_NUM(pio1, 0));
 
-    pio_remove_program_and_unclaim_sm(&wait_for_card_ready_program, pio, sm, offset);
+    pio_remove_program_and_unclaim_sm(&wait_for_card_ready_program, pio1, sm, offset);
 
     clocks_hw->wake_en0 &= ~CLOCKS_WAKE_EN0_CLK_SYS_PIO1_BITS;
     clocks_hw->sleep_en0 &= ~CLOCKS_SLEEP_EN0_CLK_SYS_PIO1_BITS;
