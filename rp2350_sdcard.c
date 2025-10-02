@@ -17,7 +17,6 @@ static unsigned requested_baud_rate = 0;
 
 #include <stdio.h>
 
-size_t card_overhead_numerator = 0, card_overhead_denominator = 0;
 unsigned long microseconds_in_wait = 0;
 unsigned long microseconds_in_data = 0;
 
@@ -38,7 +37,6 @@ static void cs_high(void) {
 static uint8_t spi_receive_one_byte_with_rx_enabled(void) {
     uint8_t ret = 0;
     spi_read_blocking(spi1, 0xFF, &ret, 1);
-    card_overhead_numerator++;
     return ret;
 }
 
@@ -69,7 +67,6 @@ static void send_command_with_crc7(const uint8_t cmd, const uint32_t arg) {
     msg[5] |= crc7_left_shifted(msg, 5);
 
     spi_write_blocking(spi1, msg, 6);
-    card_overhead_numerator += 6;
 }
 
 static uint8_t command_and_r1_response(const uint8_t cmd, const uint32_t arg) {
@@ -159,7 +156,6 @@ static void wait_for_card_ready(void) {
 static uint32_t spi_receive_uint32be(void) {
     uint32_t ret;
     spi_read_blocking(spi1, 0xFF, (void *)&ret, 4);
-    card_overhead_numerator += 4;
     return __builtin_bswap32(ret);
 }
 
@@ -340,7 +336,7 @@ int spi_sd_write_blocks_start(unsigned long long block_address) {
 
     /* extra byte prior to data packet */
     spi_write_blocking(spi1, (unsigned char[1]) { 0xff }, 1);
-    card_overhead_numerator++;
+
     microseconds_in_wait_prior = microseconds_in_wait;
     microseconds_in_data_prior = microseconds_in_data;
     return 0;
@@ -349,7 +345,6 @@ int spi_sd_write_blocks_start(unsigned long long block_address) {
 void spi_sd_write_blocks_end(void) {
     /* send stop tran token */
     spi_write_blocking(spi1, (unsigned char[2]) { 0xfd, 0xff }, 2);
-    card_overhead_numerator += 2;
 
     wait_for_card_ready();
 
@@ -392,7 +387,6 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
 
         while (spi_is_busy(spi1));
         spi_write_blocking(spi1, (unsigned char[1]) { 0xfc }, 1);
-        card_overhead_numerator++;
 
         while (spi_is_busy(spi1));
 
@@ -429,9 +423,6 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         while (dma_channel_is_busy(dma_tx))
             yield();
 
-        card_overhead_numerator += 512;
-        card_overhead_denominator += 512;
-
         /* disable and clear the irq that caused wfe to return due to sevonpend */
         dma_channel_acknowledge_irq1(dma_tx);
         dma_channel_set_irq1_enabled(dma_tx, false);
@@ -453,8 +444,6 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         /* write the calculated crc out to the card so it can validate it */
         spi_write16_blocking(spi1, &crc_dma, 1);
 
-        card_overhead_numerator += 2;
-
         /* change format back to 8 bit */
         while (spi_is_busy(spi1));
         spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
@@ -462,7 +451,7 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         /* read one byte response from card to see if it validated the crc */
         uint8_t response;
         spi_read_blocking(spi1, 0xff, &response, 1);
-        card_overhead_numerator++;
+
         response &= 0b11111;
 
         microseconds_in_data += timer_hw->timerawl - timerawl_prior;
@@ -587,8 +576,6 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
             dprintf(2, "%s: received crc 0x%04X, dma 0x%04X, %u wakes\r\n",
                     __func__, crc_received, crc_dma, wakes);
 
-        card_overhead_numerator += 512 + 2 + 1;
-
         if (crc_received != crc_dma) {
             cs_high();
             spi_disable();
@@ -603,7 +590,6 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
 
         /* CMD12 wants an extra byte prior to the response */
         spi_write_blocking(spi1, (unsigned char[1]) { 0xff }, 1);
-        card_overhead_numerator += 2;
 
         (void)r1_response();
         wait_for_card_ready();
