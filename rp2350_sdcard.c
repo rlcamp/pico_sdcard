@@ -74,26 +74,50 @@ static uint8_t command_and_r1_response(const uint8_t cmd, const uint32_t arg) {
     return r1_response();
 }
 
-static void wait_for_card_ready(void) {
+static unsigned int sm, sm_offset;
+static volatile char wait_for_card_ready_nonblocking_must_finish = 0;
+
+void isr_pio1_0(void) {
+    /* disable sm BEFORE clearing interrupt so it does not resume executing */
+    pio_sm_set_enabled(pio1, sm, false);
+
+    pio_set_irq0_source_enabled(pio1, pis_interrupt0, false);
+    pio_interrupt_clear(pio1, 0);
+    irq_clear(PIO_IRQ_NUM(pio1, 0));
+    irq_set_enabled(PIO_IRQ_NUM(pio1, 0), false);
+
+    pio_remove_program_and_unclaim_sm(&wait_for_card_ready_program, pio1, sm, sm_offset);
+
+    clocks_hw->wake_en0 &= ~CLOCKS_WAKE_EN0_CLK_SYS_PIO1_BITS;
+    clocks_hw->sleep_en0 &= ~CLOCKS_SLEEP_EN0_CLK_SYS_PIO1_BITS;
+
+    gpio_set_function(10, GPIO_FUNC_SPI);
+    gpio_set_function(11, GPIO_FUNC_SPI);
+    gpio_set_function(12, GPIO_FUNC_SPI);
+
+    wait_for_card_ready_nonblocking_must_finish = 0;
+    __DSB();
+}
+
+static void wait_for_card_ready_nonblocking_start(void) {
     spi_hw_t * spi_hw = spi_get_hw(spi1);
-    const unsigned long timerawl_prior = timer_hw->timerawl;
 
     /* first try clocking out a few bytes using the spi peripheral */
     for (size_t iattempt = 0; iattempt < 16; iattempt++) {
         while (!(spi_hw->sr & SPI_SSPSR_TNF_BITS));
         spi_hw->dr = 0xFF;
         while (!(spi_hw->sr & SPI_SSPSR_RNE_BITS));
-        if (0xFF == spi_hw->dr) {
-            microseconds_in_wait += timer_hw->timerawl - timerawl_prior;
+        if (0xFF == spi_hw->dr)
             return;
-        }
     }
+
+    wait_for_card_ready_nonblocking_must_finish = 1;
 
     clocks_hw->wake_en0 |= CLOCKS_WAKE_EN0_CLK_SYS_PIO1_BITS;
     clocks_hw->sleep_en0 |= CLOCKS_SLEEP_EN0_CLK_SYS_PIO1_BITS;
 
-    unsigned int sm = pio_claim_unused_sm(pio1, true);
-    unsigned int offset = pio_add_program(pio1, &wait_for_card_ready_program);
+    sm = pio_claim_unused_sm(pio1, true);
+    sm_offset = pio_add_program(pio1, &wait_for_card_ready_program);
 
     gpio_set_dir(10, GPIO_OUT);
     gpio_set_dir(11, GPIO_OUT);
@@ -110,43 +134,29 @@ static void wait_for_card_ready(void) {
     pio_sm_set_consecutive_pindirs(pio1, sm, 10, 2, true);
     pio_sm_set_consecutive_pindirs(pio1, sm, 12, 1, false);
 
-    pio_sm_config sm_config = wait_for_card_ready_program_get_default_config(offset);
+    pio_sm_config sm_config = wait_for_card_ready_program_get_default_config(sm_offset);
     sm_config_set_sideset_pins(&sm_config, 10);
     sm_config_set_jmp_pin(&sm_config, 12);
     sm_config_set_clkdiv_int_frac8(&sm_config, clock_get_hz(clk_sys) / (2 * requested_baud_rate), 0);
-    pio_sm_init(pio1, sm, offset, &sm_config);
+    pio_sm_init(pio1, sm, sm_offset, &sm_config);
 
     hw_set_bits(&pio1->input_sync_bypass, 1U << 12);
     __DSB();
 
     pio_set_irq0_source_enabled(pio1, pis_interrupt0, true);
     pio_interrupt_clear(pio1, sm);
-    irq_set_enabled(PIO_IRQ_NUM(pio1, 0), false);
+    irq_set_enabled(PIO_IRQ_NUM(pio1, 0), true);
 
     pio_sm_set_enabled(pio1, sm, true);
+}
 
-    /* wait for interrupt from pio */
-    __SEV();
-    while (!pio_interrupt_get(pio1, 0))
-        yield();
+static void wait_for_card_ready_nonblocking_finish(void) {
+    while (wait_for_card_ready_nonblocking_must_finish) yield();
+}
 
-    /* disable sm BEFORE clearing interrupt so it does not resume executing */
-    pio_sm_set_enabled(pio1, sm, false);
-
-    pio_set_irq0_source_enabled(pio1, pis_interrupt0, false);
-    pio_interrupt_clear(pio1, 0);
-    irq_clear(PIO_IRQ_NUM(pio1, 0));
-
-    pio_remove_program_and_unclaim_sm(&wait_for_card_ready_program, pio1, sm, offset);
-
-    clocks_hw->wake_en0 &= ~CLOCKS_WAKE_EN0_CLK_SYS_PIO1_BITS;
-    clocks_hw->sleep_en0 &= ~CLOCKS_SLEEP_EN0_CLK_SYS_PIO1_BITS;
-
-    gpio_set_function(10, GPIO_FUNC_SPI);
-    gpio_set_function(11, GPIO_FUNC_SPI);
-    gpio_set_function(12, GPIO_FUNC_SPI);
-
-    microseconds_in_wait += timer_hw->timerawl - timerawl_prior;
+static void wait_for_card_ready(void) {
+    wait_for_card_ready_nonblocking_start();
+    wait_for_card_ready_nonblocking_finish();
 }
 
 static uint32_t spi_receive_uint32be(void) {
@@ -449,9 +459,12 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
 
         response &= 0b11111;
 
-        microseconds_in_data += timer_hw->timerawl - timerawl_prior;
+        const unsigned timerawl_before_wait = timer_hw->timerawl;
+        microseconds_in_data += timerawl_before_wait - timerawl_prior;
 
         wait_for_card_ready();
+
+        microseconds_in_wait += timer_hw->timerawl - timerawl_before_wait;
 
         if (0b00101 != response) {
             if (0b01011 == response)
