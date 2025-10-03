@@ -76,6 +76,7 @@ static uint8_t command_and_r1_response(const uint8_t cmd, const uint32_t arg) {
 
 static unsigned int sm, sm_offset;
 static volatile char wait_for_card_ready_nonblocking_must_finish = 0;
+static void (* isr_pio1_0_and_then)(void) = NULL;
 
 void isr_pio1_0(void) {
     /* disable sm BEFORE clearing interrupt so it does not resume executing */
@@ -97,6 +98,11 @@ void isr_pio1_0(void) {
 
     wait_for_card_ready_nonblocking_must_finish = 0;
     __DSB();
+
+    void (* and_then)(void) = isr_pio1_0_and_then;
+    isr_pio1_0_and_then = NULL;
+    if (and_then)
+        and_then();
 }
 
 static void wait_for_card_ready_nonblocking_start(void) {
@@ -107,8 +113,13 @@ static void wait_for_card_ready_nonblocking_start(void) {
         while (!(spi_hw->sr & SPI_SSPSR_TNF_BITS));
         spi_hw->dr = 0xFF;
         while (!(spi_hw->sr & SPI_SSPSR_RNE_BITS));
-        if (0xFF == spi_hw->dr)
-            return;
+        if (0xFF == spi_hw->dr) {
+            void (* and_then)(void) = isr_pio1_0_and_then;
+            isr_pio1_0_and_then = NULL;
+            if (and_then)
+                return and_then();
+            else return;
+        }
     }
 
     wait_for_card_ready_nonblocking_must_finish = 1;
@@ -390,6 +401,90 @@ int spi_sd_write_pre_erase(unsigned long blocks) {
 /* these are things that were previously on call stacks but need to be shared with isrs */
 static uint dma_tx, dma_rx;
 static dma_channel_config cfg_tx, cfg_rx;
+static const unsigned char * tx_block;
+static size_t tx_blocks_to_start = 0, tx_blocks_to_finish = 0;
+static unsigned long timerawl_before_data, timerawl_before_wait;
+static uint8_t tx_response;
+static uint16_t tx_crc_dma;
+
+static void start_writing_next_block(void) {
+    if (!tx_blocks_to_start) return;
+
+    while (spi_is_busy(spi1));
+
+    spi_write_blocking(spi1, (unsigned char[1]) { 0xfc }, 1);
+    while (spi_is_busy(spi1));
+
+    spi_set_format(spi1, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+
+    static const uint16_t zero_word = 0;
+    dma_channel_configure(dma_tx, &cfg_tx, &spi_get_hw(spi1)->dr, tx_block ? tx_block : (void *)&zero_word, 256, false);
+    if (tx_block) tx_block += 512;
+    tx_blocks_to_start--;
+
+    /* since we are using sevonpend, enable the irq source but disable in nvic */
+    dma_channel_set_irq1_enabled(dma_tx, true);
+    irq_set_enabled(DMA_IRQ_1, false);
+
+    /* compute a CCITT16 CRC on the bytes flowing through the rx dma */
+    dma_sniffer_enable(dma_tx, 0x2, true);
+    dma_sniffer_set_byte_swap_enabled(true);
+    dma_sniffer_set_data_accumulator(0);
+
+    timerawl_before_data = timer_hw->timerawl;
+
+    /* start the dma channel */
+    dma_start_channel_mask(1u << dma_tx);
+}
+
+static void handle_block_wait_finished(void) {
+    microseconds_in_wait += timer_hw->timerawl - timerawl_before_wait;
+
+    if (0b00101 != tx_response)
+        tx_blocks_to_finish = 0;
+    else
+        tx_blocks_to_finish--;
+
+    __DSB();
+}
+
+static void finish_writing_block(void) {
+    /* disable and clear the irq that caused wfe to return due to sevonpend */
+    dma_channel_acknowledge_irq1(dma_tx);
+    dma_channel_set_irq1_enabled(dma_tx, false);
+    irq_clear(DMA_IRQ_1);
+
+    /* retrieve the crc that we calculated on the bytes as they came in */
+    tx_crc_dma = dma_sniffer_get_data_accumulator();
+
+    dma_channel_cleanup(dma_tx);
+    dma_sniffer_disable();
+
+    /* wait for the rest of the spi tx fifo to drain, with wfe inhibited because it
+     will not be accompanied by an interrupt that would wake the processor */
+    while (spi_is_busy(spi1)) {
+        __sev();
+        yield();
+    }
+
+    /* write the calculated crc out to the card so it can validate it */
+    spi_write16_blocking(spi1, &tx_crc_dma, 1);
+
+    /* change format back to 8 bit */
+    while (spi_is_busy(spi1));
+    spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+
+    /* read one byte response from card to see if it validated the crc */
+    spi_read_blocking(spi1, 0xff, &tx_response, 1);
+
+    tx_response &= 0b11111;
+
+    timerawl_before_wait = timer_hw->timerawl;
+    microseconds_in_data += timerawl_before_wait - timerawl_before_data;
+
+    isr_pio1_0_and_then = handle_block_wait_finished;
+    wait_for_card_ready_nonblocking_start();
+}
 
 int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
     dma_tx = dma_claim_unused_channel(true);
@@ -401,89 +496,35 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
     channel_config_set_write_increment(&cfg_tx, false);
     channel_config_set_bswap(&cfg_tx, true);
 
-    for (size_t iblock = 0; iblock < blocks; iblock++) {
-        const unsigned char * block = buf ? (void *)((unsigned char *)buf + 512 * iblock) : NULL;
+    tx_block = buf;
+    tx_blocks_to_start = blocks;
+    tx_blocks_to_finish = blocks;
 
-        while (spi_is_busy(spi1));
-        spi_write_blocking(spi1, (unsigned char[1]) { 0xfc }, 1);
-
-        while (spi_is_busy(spi1));
-
-        spi_set_format(spi1, 16, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
-
-        const unsigned long timerawl_prior = timer_hw->timerawl;
-
-        static const uint16_t zero_word = 0;
-        dma_channel_configure(dma_tx, &cfg_tx, &spi_get_hw(spi1)->dr, block ? block : (void *)&zero_word, 256, false);
-
-        /* since we are using sevonpend, enable the irq source but disable in nvic */
-        dma_channel_set_irq1_enabled(dma_tx, true);
-        irq_set_enabled(DMA_IRQ_1, false);
-
-        /* compute a CCITT16 CRC on the bytes flowing through the rx dma */
-        dma_sniffer_enable(dma_tx, 0x2, true);
-        dma_sniffer_set_byte_swap_enabled(true);
-        dma_sniffer_set_data_accumulator(0);
-
-        /* start the dma channel */
-        dma_start_channel_mask(1u << dma_tx);
+    while (tx_blocks_to_finish) {
+        start_writing_next_block();
 
         /* do other things and then sleep, while waiting for dma to finish */
         while (dma_channel_is_busy(dma_tx))
             yield();
 
-        /* disable and clear the irq that caused wfe to return due to sevonpend */
-        dma_channel_acknowledge_irq1(dma_tx);
-        dma_channel_set_irq1_enabled(dma_tx, false);
-        irq_clear(DMA_IRQ_1);
+        finish_writing_block();
 
-        /* retrieve the crc that we calculated on the bytes as they came in */
-        const uint16_t crc_dma = dma_sniffer_get_data_accumulator();
-
-        dma_channel_cleanup(dma_tx);
-        dma_sniffer_disable();
-
-        /* wait for the rest of the spi tx fifo to drain, with wfe inhibited because it
-         will not be accompanied by an interrupt that would wake the processor */
-        while (spi_is_busy(spi1)) {
-            __sev();
+        while (wait_for_card_ready_nonblocking_must_finish)
             yield();
-        }
-
-        /* write the calculated crc out to the card so it can validate it */
-        spi_write16_blocking(spi1, &crc_dma, 1);
-
-        /* change format back to 8 bit */
-        while (spi_is_busy(spi1));
-        spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
-
-        /* read one byte response from card to see if it validated the crc */
-        uint8_t response;
-        spi_read_blocking(spi1, 0xff, &response, 1);
-
-        response &= 0b11111;
-
-        const unsigned timerawl_before_wait = timer_hw->timerawl;
-        microseconds_in_data += timerawl_before_wait - timerawl_prior;
-
-        wait_for_card_ready();
-
-        microseconds_in_wait += timer_hw->timerawl - timerawl_before_wait;
-
-        if (0b00101 != response) {
-            if (0b01011 == response)
-                dprintf(2, "%s: bad crc (sent 0x%04X)\r\n", __func__, crc_dma);
-            else
-                dprintf(2, "%s: error 0x%x\r\n", __func__, response);
-
-            cs_high();
-            spi_disable();
-            dma_channel_unclaim(dma_tx);
-            return -1;
-        }
     }
 
     dma_channel_unclaim(dma_tx);
+
+    if (0b00101 != tx_response) {
+        if (0b01011 == tx_response)
+            dprintf(2, "%s: bad crc (sent 0x%04X)\r\n", __func__, tx_crc_dma);
+        else
+            dprintf(2, "%s: error 0x%x\r\n", __func__, tx_response);
+
+        cs_high();
+        spi_disable();
+        return -1;
+    }
 
     return 0;
 }
