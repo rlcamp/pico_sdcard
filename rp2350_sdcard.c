@@ -507,6 +507,21 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         return -1;
     }
 
+    const uint dma_rx = dma_claim_unused_channel(true);
+    const uint dma_tx = dma_claim_unused_channel(true);
+
+    dma_channel_config cfg_tx = dma_channel_get_default_config(dma_tx);
+    channel_config_set_transfer_data_size(&cfg_tx, DMA_SIZE_16);
+    channel_config_set_dreq(&cfg_tx, spi_get_dreq(spi1, true));
+    channel_config_set_read_increment(&cfg_tx, false);
+
+    dma_channel_config cfg_rx = dma_channel_get_default_config(dma_rx);
+    channel_config_set_transfer_data_size(&cfg_rx, DMA_SIZE_16);
+    channel_config_set_dreq(&cfg_rx, spi_get_dreq(spi1, false));
+    channel_config_set_read_increment(&cfg_rx, false);
+    channel_config_set_write_increment(&cfg_rx, true);
+    channel_config_set_bswap(&cfg_rx, true);
+
     /* clock out the response in 1 + 512 + 2 byte blocks */
     for (size_t iblock = 0; iblock < blocks; iblock++) {
         uint8_t result;
@@ -517,6 +532,8 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         if (0xFE != result) {
             cs_high();
             spi_disable();
+            dma_channel_unclaim(dma_rx);
+            dma_channel_unclaim(dma_tx);
             dprintf(2, "%s(%d): fail\r\n", __func__, __LINE__);
             return -1;
         }
@@ -525,23 +542,9 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
 
         uint16_t * restrict const block = ((uint16_t *)buf) + 256 * iblock;
 
-        const uint dma_rx = dma_claim_unused_channel(true);
-        const uint dma_tx = dma_claim_unused_channel(true);
-
         /* there has got to be a better way to do this than clock out bytes */
-        dma_channel_config cfg = dma_channel_get_default_config(dma_tx);
-        channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
-        channel_config_set_dreq(&cfg, spi_get_dreq(spi1, true));
-        channel_config_set_read_increment(&cfg, false);
-        dma_channel_configure(dma_tx, &cfg, &spi_get_hw(spi1)->dr, &(uint16_t) { 0xFFFF }, 256, false);
-
-        cfg = dma_channel_get_default_config(dma_rx);
-        channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
-        channel_config_set_dreq(&cfg, spi_get_dreq(spi1, false));
-        channel_config_set_read_increment(&cfg, false);
-        channel_config_set_write_increment(&cfg, true);
-        channel_config_set_bswap(&cfg, true);
-        dma_channel_configure(dma_rx, &cfg, block, &spi_get_hw(spi1)->dr, 256, false);
+        dma_channel_configure(dma_tx, &cfg_tx, &spi_get_hw(spi1)->dr, &(uint16_t) { 0xFFFF }, 256, false);
+        dma_channel_configure(dma_rx, &cfg_rx, block, &spi_get_hw(spi1)->dr, 256, false);
 
         dma_channel_acknowledge_irq1(dma_rx);
 
@@ -573,8 +576,8 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         /* retrieve the crc that we calculated on the bytes as they came in */
         const uint16_t crc_dma = dma_sniffer_get_data_accumulator();
 
-        dma_channel_unclaim(dma_rx);
-        dma_channel_unclaim(dma_tx);
+        dma_channel_cleanup(dma_rx);
+        dma_channel_cleanup(dma_tx);
         dma_sniffer_disable();
 
         /* read the crc reported by the sd card */
@@ -590,6 +593,8 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         if (crc_received != crc_dma) {
             cs_high();
             spi_disable();
+            dma_channel_unclaim(dma_rx);
+            dma_channel_unclaim(dma_tx);
             dprintf(2, "%s: bad crc\r\n", __func__);
             return -1;
         }
@@ -608,6 +613,8 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
 
     cs_high();
     spi_disable();
+    dma_channel_unclaim(dma_rx);
+    dma_channel_unclaim(dma_tx);
 
     return 0;
 }
