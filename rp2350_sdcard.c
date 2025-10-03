@@ -422,9 +422,8 @@ static void start_writing_next_block(void) {
     if (tx_block) tx_block += 512;
     tx_blocks_to_start--;
 
-    /* since we are using sevonpend, enable the irq source but disable in nvic */
     dma_channel_set_irq1_enabled(dma_tx, true);
-    irq_set_enabled(DMA_IRQ_1, false);
+    irq_set_enabled(DMA_IRQ_1, true);
 
     /* compute a CCITT16 CRC on the bytes flowing through the rx dma */
     dma_sniffer_enable(dma_tx, 0x2, true);
@@ -446,13 +445,14 @@ static void handle_block_wait_finished(void) {
         tx_blocks_to_finish--;
 
     __DSB();
+
+    start_writing_next_block();
 }
 
-static void finish_writing_block(void) {
+void isr_dma_1(void) {
     /* disable and clear the irq that caused wfe to return due to sevonpend */
     dma_channel_acknowledge_irq1(dma_tx);
     dma_channel_set_irq1_enabled(dma_tx, false);
-    irq_clear(DMA_IRQ_1);
 
     /* retrieve the crc that we calculated on the bytes as they came in */
     tx_crc_dma = dma_sniffer_get_data_accumulator();
@@ -462,10 +462,7 @@ static void finish_writing_block(void) {
 
     /* wait for the rest of the spi tx fifo to drain, with wfe inhibited because it
      will not be accompanied by an interrupt that would wake the processor */
-    while (spi_is_busy(spi1)) {
-        __sev();
-        yield();
-    }
+    while (spi_is_busy(spi1));
 
     /* write the calculated crc out to the card so it can validate it */
     spi_write16_blocking(spi1, &tx_crc_dma, 1);
@@ -484,6 +481,8 @@ static void finish_writing_block(void) {
 
     isr_pio1_0_and_then = handle_block_wait_finished;
     wait_for_card_ready_nonblocking_start();
+
+    __DSB();
 }
 
 int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
@@ -500,18 +499,11 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
     tx_blocks_to_start = blocks;
     tx_blocks_to_finish = blocks;
 
-    while (tx_blocks_to_finish) {
-        start_writing_next_block();
+    start_writing_next_block();
 
-        /* do other things and then sleep, while waiting for dma to finish */
-        while (dma_channel_is_busy(dma_tx))
-            yield();
-
-        finish_writing_block();
-
-        while (wait_for_card_ready_nonblocking_must_finish)
-            yield();
-    }
+    /* do other things until the chain of dma and isrs and pio finishes all block writes
+     or gets and off-nominal tx response and stops */
+    while (tx_blocks_to_finish) yield();
 
     dma_channel_unclaim(dma_tx);
 
