@@ -387,15 +387,19 @@ int spi_sd_write_pre_erase(unsigned long blocks) {
     return acmd23_r1_response ? -1 : 0;
 }
 
-int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
-    const uint dma_tx = dma_claim_unused_channel(true);
+/* these are things that were previously on call stacks but need to be shared with isrs */
+static uint dma_tx, dma_rx;
+static dma_channel_config cfg_tx, cfg_rx;
 
-    dma_channel_config cfg = dma_channel_get_default_config(dma_tx);
-    channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
-    channel_config_set_dreq(&cfg, spi_get_dreq(spi1, true));
-    channel_config_set_read_increment(&cfg, buf ? true : false);
-    channel_config_set_write_increment(&cfg, false);
-    channel_config_set_bswap(&cfg, true);
+int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
+    dma_tx = dma_claim_unused_channel(true);
+
+    cfg_tx = dma_channel_get_default_config(dma_tx);
+    channel_config_set_transfer_data_size(&cfg_tx, DMA_SIZE_16);
+    channel_config_set_dreq(&cfg_tx, spi_get_dreq(spi1, true));
+    channel_config_set_read_increment(&cfg_tx, buf ? true : false);
+    channel_config_set_write_increment(&cfg_tx, false);
+    channel_config_set_bswap(&cfg_tx, true);
 
     for (size_t iblock = 0; iblock < blocks; iblock++) {
         const unsigned char * block = buf ? (void *)((unsigned char *)buf + 512 * iblock) : NULL;
@@ -410,7 +414,7 @@ int spi_sd_write_some_blocks(const void * buf, const unsigned long blocks) {
         const unsigned long timerawl_prior = timer_hw->timerawl;
 
         static const uint16_t zero_word = 0;
-        dma_channel_configure(dma_tx, &cfg, &spi_get_hw(spi1)->dr, block ? block : (void *)&zero_word, 256, false);
+        dma_channel_configure(dma_tx, &cfg_tx, &spi_get_hw(spi1)->dr, block ? block : (void *)&zero_word, 256, false);
 
         /* since we are using sevonpend, enable the irq source but disable in nvic */
         dma_channel_set_irq1_enabled(dma_tx, true);
@@ -507,15 +511,15 @@ int spi_sd_read_blocks(void * buf, unsigned long blocks, unsigned long long bloc
         return -1;
     }
 
-    const uint dma_rx = dma_claim_unused_channel(true);
-    const uint dma_tx = dma_claim_unused_channel(true);
+    dma_rx = dma_claim_unused_channel(true);
+    dma_tx = dma_claim_unused_channel(true);
 
-    dma_channel_config cfg_tx = dma_channel_get_default_config(dma_tx);
+    cfg_tx = dma_channel_get_default_config(dma_tx);
     channel_config_set_transfer_data_size(&cfg_tx, DMA_SIZE_16);
     channel_config_set_dreq(&cfg_tx, spi_get_dreq(spi1, true));
     channel_config_set_read_increment(&cfg_tx, false);
 
-    dma_channel_config cfg_rx = dma_channel_get_default_config(dma_rx);
+    cfg_rx = dma_channel_get_default_config(dma_rx);
     channel_config_set_transfer_data_size(&cfg_rx, DMA_SIZE_16);
     channel_config_set_dreq(&cfg_rx, spi_get_dreq(spi1, false));
     channel_config_set_read_increment(&cfg_rx, false);
