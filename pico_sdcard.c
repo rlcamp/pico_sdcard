@@ -399,6 +399,37 @@ static int bme280_read_and_print(void) {
     return 0;
 }
 
+static int touch(const char * path) {
+    if (-1 == card_request()) return -1;
+
+    do {
+        /* large thing on stack */
+        FIL * fp = &(FIL) { };
+        FRESULT fres;
+
+        if ((fres = f_open(fp, path, FA_CREATE_ALWAYS | FA_WRITE))) {
+            dprintf(2, "%s: f_open(\"%s\"): %d\r\n", __func__, path, fres);
+            break;
+        }
+
+        /* this will usually return immediately, occasionally it will internally yield() */
+        if (-1 == fputs_to_open_file(fp, "hello\n")) break;
+
+        if ((fres = f_close(fp))) {
+            dprintf(2, "%s: f_close(\"%s\"): %d\r\n", __func__, path, fres);
+            break;
+        }
+
+        dprintf(2, "%s: successfully wrote to %s\r\n", __func__, path);
+
+        card_release();
+        return 0;
+    } while(0);
+
+    card_release();
+    return -1;
+}
+
 int main(void) {
     run_from_xosc();
 
@@ -512,6 +543,8 @@ int main(void) {
                 ls(NULL);
             else if (line == strstr(line, "cat "))
                 cat(line + 4);
+            else if (line == strstr(line, "touch "))
+                touch(line + 6);
 
             else if (line == strstr(line, "ecezo ") && !child_is_running(&child_sample.child))
                 ecezo_command(line + 6);
