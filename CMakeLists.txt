@@ -36,7 +36,7 @@ pico_sdk_init()
 
 # rest of your project
 add_executable(pico_sdcard
-    pico_sdcard.c
+    main.c
     rp2350_sdcard.c
     diskio.c
     ff.c
