@@ -43,9 +43,7 @@ add_executable(pico_sdcard
     ffunicode.c
     cooperative_fatfs.c
     rp2350_cooperative_uart.c
-    rp2350_cooperative_i2c.c
     dprintf.c
-    rp2350_ds3231.c
 )
 
 # add some warning flags TODO: figure out how to make these only apply to the above files

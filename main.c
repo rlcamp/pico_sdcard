@@ -11,7 +11,6 @@
 #include "hardware/sync.h"
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
-#include "hardware/i2c.h"
 
 /* so that we can reset into bootloader on command */
 #include "pico/bootrom.h"
@@ -23,8 +22,6 @@
 #include "rp2350_sdcard.h"
 #include "cooperative_fatfs.h"
 #include "rp2350_cooperative_uart.h"
-#include "rp2350_cooperative_i2c.h"
-#include "rp2350_ds3231.h"
 
 /* third party includes */
 #include "ff.h"
@@ -32,10 +29,23 @@
 /* c standard includes */
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 extern void yield(void);
 
 volatile unsigned char verbose = 0;
+
+__attribute((weak))
+uint32_t get_fattime(void) {
+    /* dummy fattime function, replace with something filled by an rtc */
+    struct tm out = { .tm_year = 2025 };
+    return ((out.tm_year - 80) << 25U |
+            (out.tm_mon + 1) << 21U |
+            out.tm_mday << 16U |
+            out.tm_hour << 11U |
+            out.tm_min << 5U |
+            out.tm_sec >> 1U);
+}
 
 static int fputs_to_open_file(FIL * fp, const char * string) {
     const size_t len = strlen(string);
@@ -182,7 +192,7 @@ int main(void) {
                              CLOCKS_WAKE_EN0_CLK_SYS_PIO0_BITS |
                              CLOCKS_WAKE_EN0_CLK_SYS_JTAG_BITS |
                              CLOCKS_WAKE_EN0_CLK_SYS_I2C1_BITS |
-                             CLOCKS_WAKE_EN0_CLK_SYS_I2C0_BITS | /* will be reenabled on demand */
+                             CLOCKS_WAKE_EN0_CLK_SYS_I2C0_BITS |
                              CLOCKS_WAKE_EN0_CLK_SYS_HSTX_BITS |
                              CLOCKS_WAKE_EN0_CLK_HSTX_BITS |
                              CLOCKS_WAKE_EN0_CLK_SYS_ADC_BITS |
@@ -199,11 +209,6 @@ int main(void) {
 
     dprintf(2, "\r\n%s: built from %s\r\n", PROGNAME, GIT_VERSION);
 
-    if (-1 == ds3231_to_sys())
-        dprintf(2, "%s: could not read ds3231\r\n", PROGNAME);
-    else
-        dprintf(2, "%s: successfully read ds3231\r\n", PROGNAME);
-
     /* loop on characters from uart */
     while (1) {
         const char * line = get_line_from_uart();
@@ -213,10 +218,7 @@ int main(void) {
             const unsigned long long uptime_now = timer_time_us_64(timer_hw);
             dprintf(2, "%% %s\r\n", line);
 
-            if (0 == gpzda_to_sys(line, 115200, uptime_now))
-                dprintf(2, "%s: got valid timestamp\r\n", PROGNAME);
-
-            else if (line == strstr(line, "ls "))
+            if (line == strstr(line, "ls "))
                 ls(line + 3);
             else if (!strcmp(line, "ls"))
                 ls(NULL);
@@ -230,11 +232,6 @@ int main(void) {
                 uart_tx_wait_blocking_with_yield();
                 rom_reset_usb_boot_extra(-1, 0, false);
             }
-
-            else if (!strcmp(line, "hctosys"))
-                ds3231_to_sys();
-            else if (!strcmp(line, "systohc"))
-                sys_to_ds3231();
 
             else if (!strcmp(line, "uptime"))
                 dprintf(2, "%s: uptime %lu\r\n", PROGNAME, (unsigned long)(uptime_now / 1000000ULL));
