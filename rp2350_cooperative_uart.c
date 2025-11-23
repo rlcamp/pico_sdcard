@@ -1,5 +1,4 @@
 #include "rp2350_cooperative_uart.h"
-#include "cortex_m_cooperative_multitasking.h"
 
 #include "hardware/uart.h"
 #include "hardware/irq.h"
@@ -7,7 +6,8 @@
 #include "hardware/sync.h"
 #include "RP2350.h"
 
-extern void yield(void);
+__attribute((weak)) void yield(void) { }
+__attribute((weak)) void * current_task(void) { return NULL; }
 
 /* ring buffer that holds individual bytes between interrupt and main thread. note the size
  of this buffer should probably be a function of baud rate and max expected delay between
